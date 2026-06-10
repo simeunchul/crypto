@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Crypto Swing — walk-forward 분석 (수익이 일시적인가 꾸준한가)</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; max-width: 1100px; margin: 28px auto; padding: 0 18px; color: #1d1d1f; line-height: 1.55; }
+  h1 { font-size: 26px; border-bottom: 2px solid #1d1d1f; padding-bottom: 6px; }
+  h2 { font-size: 21px; margin-top: 36px; border-left: 5px solid #007aff; padding-left: 10px; }
+  h3 { font-size: 17px; margin-top: 22px; }
+  .callout { background: #fff8e6; border-left: 5px solid #ffb800; padding: 12px 16px; margin: 16px 0; border-radius: 3px; }
+  .callout.win  { background: #e6f7eb; border-left-color: #28a745; }
+  .callout.warn { background: #fde6e6; border-left-color: #dc3545; }
+  .callout.info { background: #e7f1ff; border-left-color: #007aff; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13.5px; }
+  th, td { border: 1px solid #d0d5dd; padding: 6px 8px; text-align: right; }
+  th { background: #f5f6f8; text-align: center; }
+  td:first-child, td.label { text-align: left; }
+  .green { color: #28a745; font-weight: 600; }
+  .red { color: #dc3545; }
+  .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 13px; }
+  pre { background: #f5f6f8; padding: 12px; overflow-x: auto; font-size: 12.5px; border-radius: 3px; }
+  .tldr { background: #eef4ff; border: 1px solid #b6cffd; padding: 14px 18px; border-radius: 4px; margin: 18px 0; }
+  .diagram { background: #fafbfc; border: 1px solid #d0d5dd; padding: 14px; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; white-space: pre; overflow-x: auto; }
+</style>
+</head>
+<body>
+
+<h1>Crypto Swing — walk-forward 분석</h1>
+<p class="mono">생성: 2026-05-28 · 작업자: simeunchul · 관련: <code>backtest_crypto_walkforward_365d_20260528_132914</code></p>
+
+<div class="callout win">
+<b>한 줄 결과.</b>
+질문은 "long-short 봇의 수익이 일시적인가, 장기 꾸준한가". 365일을 30일 윈도우 11개로 쪼개 검증한 결과 <b>11개 윈도우 전부 +수익, 전체 승률 90% (110 표본 중 99개)</b>. 심지어 횡보(RANGE)로 분류된 구간도 평균 +9.55% / 승률 89.7%. 즉 <b>backtest 상으로는 "추세 의존" 이 아니라 "변동성만 있으면 양방향으로 꾸준히" 수익</b>. 단 결정적 단서 3가지 — 이 365일이 변동성 풍부한 활황기, funding rate 미반영, 슬리피지 미반영 — 으로 실제 live 는 이보다 낮을 것.
+</div>
+
+<h2>1. 왜 walk-forward 인가</h2>
+<div class="callout info">
+<b>walk-forward = 시간 축을 따라 앞으로 걸어가며 검증.</b>
+일반 백테스트는 "365일 전체로 파라미터를 고르고 그 전체 성과를 본다" — 미래를 다 보고 과거를 맞춘 셈이라 overfitting (curve fitting) 위험. walk-forward 는 시간을 쪼개 "항상 과거로 정하고 아직 안 본 미래로 검증" 하여 실전과 같은 조건을 만든다. 이름 그대로 시간 위를 한 발(walk) 앞으로(forward) 내디디며 검증.
+</div>
+<p class="mono">주: 이번 분석은 파라미터(12/48, trail2)를 고정하고 30일 구간별 성과만 분리 측정한 단순화 버전 (out-of-sample 구간 분석). 진짜 walk-forward optimization 은 각 구간마다 파라미터를 재최적화한다.</p>
+
+<h2>2. 방법</h2>
+<table>
+<tr><th>항목</th><th>값</th></tr>
+<tr><td class="label">전략</td><td>4h봉 + 12/48 MA + trail-2% + <b>long-short</b> (sweep 우승자 B)</td></tr>
+<tr><td class="label">기간</td><td>365일 (2025-05-28 ~ 2026-03 무렵)</td></tr>
+<tr><td class="label">윈도우</td><td>30일 비중첩 × 11개</td></tr>
+<tr><td class="label">종목</td><td>BTC, ETH, SOL, AVAX, BNB, OP, SUI, NEAR, INJ, ARB (10종)</td></tr>
+<tr><td class="label">표본</td><td>11 윈도우 × 10 종목 = 110</td></tr>
+<tr><td class="label">국면 분류</td><td>구간 buy&amp;hold |수익률|: ≥15% STRONG_TREND, ≥6% WEAK_TREND, &lt;6% RANGE</td></tr>
+</table>
+
+<h2>3. 결과 — 윈도우별 (시간 순)</h2>
+<table>
+<tr><th>윈도우</th><th>시작일</th><th>수익%</th><th>Sharpe</th><th>MDD%</th><th>buy&amp;hold%</th><th>국면</th><th>+종목/총</th></tr>
+<tr><td>0</td><td>2025-05-28</td><td class="green">+8.64</td><td>+3.55</td><td>-3.29</td><td>-20.75</td><td>STRONG_TREND</td><td>10/10</td></tr>
+<tr><td>1</td><td>2025-06-27</td><td class="green">+10.63</td><td>+4.02</td><td>-3.87</td><td>+38.98</td><td>STRONG_TREND</td><td>9/10</td></tr>
+<tr><td>2</td><td>2025-07-27</td><td class="green">+11.58</td><td>+4.38</td><td>-4.80</td><td>-2.76</td><td>STRONG_TREND</td><td>10/10</td></tr>
+<tr><td>3</td><td>2025-08-26</td><td class="green">+9.26</td><td>+3.93</td><td>-3.49</td><td>+3.06</td><td>STRONG_TREND</td><td>9/10</td></tr>
+<tr><td>4</td><td>2025-09-25</td><td class="green">+13.96</td><td>+4.93</td><td>-4.56</td><td>-15.93</td><td>STRONG_TREND</td><td>10/10</td></tr>
+<tr><td>5</td><td>2025-10-25</td><td class="green">+16.95</td><td>+5.96</td><td>-2.87</td><td>-29.98</td><td>STRONG_TREND</td><td>10/10</td></tr>
+<tr><td>6</td><td>2025-11-24</td><td class="green">+5.38</td><td>+2.17</td><td>-5.88</td><td>-7.53</td><td>RANGE</td><td>8/10</td></tr>
+<tr><td>7</td><td>2025-12-24</td><td class="green">+8.59</td><td>+3.57</td><td>-4.33</td><td>+4.54</td><td>RANGE</td><td>8/10</td></tr>
+<tr><td>8</td><td>2026-01-23</td><td class="green">+4.52</td><td>+1.90</td><td>-4.10</td><td>-34.23</td><td>STRONG_TREND</td><td>8/10</td></tr>
+<tr><td>9</td><td>2026-02-22</td><td class="green">+7.48</td><td>+3.24</td><td>-4.10</td><td>+4.05</td><td>WEAK_TREND</td><td>9/10</td></tr>
+<tr><td>10</td><td>2026-03-24</td><td class="green">+4.15</td><td>+1.74</td><td>-4.57</td><td>+5.40</td><td>WEAK_TREND</td><td>8/10</td></tr>
+</table>
+<p><b>11개 윈도우 전부 +수익. 단 한 구간도 마이너스 없음.</b> 최악 윈도우 평균도 +4.15%.</p>
+
+<h3>3-1. 차트 — 윈도우별 평균 수익률 (시간 순)</h3>
+<svg viewBox="0 0 820 300" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace, Consolas, monospace" font-size="11">
+  <line x1="60" y1="20" x2="60" y2="230" stroke="#333"/>
+  <line x1="60" y1="230" x2="800" y2="230" stroke="#333"/>
+  <text x="430" y="14" font-size="13" font-weight="bold" text-anchor="middle">윈도우별 평균 수익률 (30일 단위, 전 종목 평균)</text>
+
+  <!-- Y axis: 0 at y=230, +20 at y=30 → 10/unit=10px -->
+  <text x="54" y="233" text-anchor="end">0</text>
+  <text x="54" y="180" text-anchor="end">+5</text>
+  <text x="54" y="130" text-anchor="end">+10</text>
+  <text x="54" y="80" text-anchor="end">+15</text>
+  <text x="54" y="30" text-anchor="end">+20</text>
+  <line x1="60" y1="130" x2="800" y2="130" stroke="#aaa" stroke-dasharray="3,3"/>
+  <text x="802" y="133" fill="#888">+10%</text>
+
+  <!-- bars: 11 windows, x from 75, width 55, gap 10 -->
+  <!-- height = ret * 10 -->
+  <!-- w0 +8.64 -->
+  <rect x="75"  y="143" width="50" height="87"  fill="#28a745"/><text x="100" y="245" text-anchor="middle">W0</text><text x="100" y="139" text-anchor="middle" font-size="9">8.6</text>
+  <rect x="140" y="124" width="50" height="106" fill="#28a745"/><text x="165" y="245" text-anchor="middle">W1</text><text x="165" y="120" text-anchor="middle" font-size="9">10.6</text>
+  <rect x="205" y="114" width="50" height="116" fill="#28a745"/><text x="230" y="245" text-anchor="middle">W2</text><text x="230" y="110" text-anchor="middle" font-size="9">11.6</text>
+  <rect x="270" y="137" width="50" height="93"  fill="#28a745"/><text x="295" y="245" text-anchor="middle">W3</text><text x="295" y="133" text-anchor="middle" font-size="9">9.3</text>
+  <rect x="335" y="90"  width="50" height="140" fill="#28a745"/><text x="360" y="245" text-anchor="middle">W4</text><text x="360" y="86" text-anchor="middle" font-size="9">14.0</text>
+  <rect x="400" y="60"  width="50" height="170" fill="#1a7a32"/><text x="425" y="245" text-anchor="middle">W5</text><text x="425" y="56" text-anchor="middle" font-size="9">17.0</text>
+  <!-- W6, W7 = RANGE (다른 색) -->
+  <rect x="465" y="176" width="50" height="54"  fill="#3273dc"/><text x="490" y="245" text-anchor="middle">W6</text><text x="490" y="172" text-anchor="middle" font-size="9">5.4</text>
+  <rect x="530" y="144" width="50" height="86"  fill="#3273dc"/><text x="555" y="245" text-anchor="middle">W7</text><text x="555" y="140" text-anchor="middle" font-size="9">8.6</text>
+  <rect x="595" y="185" width="50" height="45"  fill="#28a745"/><text x="620" y="245" text-anchor="middle">W8</text><text x="620" y="181" text-anchor="middle" font-size="9">4.5</text>
+  <rect x="660" y="155" width="50" height="75"  fill="#90c699"/><text x="685" y="245" text-anchor="middle">W9</text><text x="685" y="151" text-anchor="middle" font-size="9">7.5</text>
+  <rect x="725" y="188" width="50" height="42"  fill="#90c699"/><text x="750" y="245" text-anchor="middle">W10</text><text x="750" y="184" text-anchor="middle" font-size="9">4.2</text>
+
+  <!-- legend -->
+  <rect x="60"  y="270" width="12" height="10" fill="#28a745"/><text x="76" y="279">STRONG_TREND</text>
+  <rect x="200" y="270" width="12" height="10" fill="#90c699"/><text x="216" y="279">WEAK_TREND</text>
+  <rect x="330" y="270" width="12" height="10" fill="#3273dc"/><text x="346" y="279">RANGE (횡보)</text>
+</svg>
+
+<h2>4. 핵심 — 시장 국면별 성과 (추세 의존인가?)</h2>
+<table>
+<tr><th>국면</th><th>표본 수</th><th>평균 수익%</th><th>평균 Sharpe</th><th>승률%</th></tr>
+<tr><td class="label">STRONG_TREND</td><td>55</td><td class="green">+9.87</td><td>+3.77</td><td>90.9</td></tr>
+<tr><td class="label">WEAK_TREND</td><td>26</td><td class="green">+7.37</td><td>+2.97</td><td>88.5</td></tr>
+<tr><td class="label">RANGE (횡보)</td><td>29</td><td class="green">+9.55</td><td>+3.77</td><td>89.7</td></tr>
+</table>
+
+<div class="callout">
+<b>예상 밖 — 횡보(RANGE)에서도 잘 됨.</b>
+당초 "trend-follow 는 횡보장에 약하다" 고 봤으나, RANGE 구간도 +9.55% / 승률 89.7%. trend-follow 가 추세장에서만 버는 게 아니었다.
+</div>
+
+<div class="callout info">
+<b>왜 횡보에서도 +? — "RANGE" 의 정체.</b>
+여기서 RANGE = "30일 시작가와 끝가가 비슷하다 (buy&amp;hold ±6% 이내)" 일 뿐.
+30일 동안 가격이 올랐다 내렸다 (swing) 크게 흔들렸어도 결국 제자리로 돌아오면 buy&amp;hold 는 0 에 가깝다.
+→ 그 안의 단기 추세를 long-short 가 양방향으로 다 잡음.
+→ 즉 "방향 없는 횡보" 가 아니라 "변동성 있는 횡보".
+<br><b>진짜 위험은 "방향 없음" 이 아니라 "변동성 자체가 죽는 것" (저변동성 박스권). 이 365일엔 그런 구간이 거의 없었다.</b>
+</div>
+
+<h2>5. 사용자 질문의 답</h2>
+<div class="diagram">Q: 지금 수익은 일시적인가? long-short 오가며 장기 꾸준 수익 가능한가?
+
+A: backtest 상으로는 "꾸준" 에 가깝다.
+   - 11개 윈도우 전부 +, 전체 승률 90%
+   - 추세 의존이 아니라 "변동성만 있으면 양방향으로 수익"
+   - 지금 2일 수익은 운보다 전략 효과 쪽에 무게
+
+   단, 결정적 단서 3가지 (실제 live 는 이보다 낮을 것):
+   ① 이 365일이 코인 변동성 풍부한 활황기 (저변동성 정체 구간 부재)
+   ② funding rate 미반영 — SHORT 다수 시 실제론 비용 발생
+   ③ 슬리피지 미반영 — 시장가 체결 손실
+
+   → 다음 검증: 변동성 기준으로 구간 재분류하여
+     "저변동성 박스권" 에서 trend vs mean-reversion 비교 (진행 예정)</div>
+
+<h2>6. 전체 통계</h2>
+<table>
+<tr><td class="label">+수익 윈도우 비율 (승률)</td><td><b class="green">90.0%</b> (110 중 99)</td></tr>
+<tr><td class="label">평균 윈도우 수익률</td><td>+9.19% / 30일</td></tr>
+<tr><td class="label">중앙값</td><td>+8.34%</td></tr>
+<tr><td class="label">최고 윈도우</td><td class="green">+36.94%</td></tr>
+<tr><td class="label">최악 윈도우</td><td class="red">-12.34%</td></tr>
+<tr><td class="label">표준편차</td><td>9.41%</td></tr>
+</table>
+
+<h2>7. 비전공자용 요약 (TL;DR)</h2>
+<div class="tldr">
+<ol>
+<li><b>walk-forward = 시간을 쪼개 "과거로 정하고 미래로 검증" — 백테스트의 미래 훔쳐보기 함정을 막는 방법.</b></li>
+<li><b>365일을 30일 11조각으로 나눠 봤더니 전부 +수익, 승률 90%.</b> 한 구간도 마이너스 없음.</li>
+<li><b>횡보 구간도 +9.55% — trend-follow 가 추세장에서만 버는 게 아니었다.</b>
+   30일 buy&amp;hold 가 0 이어도 그 안에 변동(swing)이 많으면 long-short 가 다 잡음.</li>
+<li><b>그래서 지금 수익은 "운" 보다 "전략 효과" 쪽 — backtest 상으로는 꾸준.</b></li>
+<li><b>단 주의 — 이 기간이 변동성 풍부한 활황기였고, funding/슬리피지 미반영.</b>
+   진짜 위험은 "변동성 자체가 죽는 저변동성 박스권" — 이건 다음 backtest 로 확인 예정.</li>
+</ol>
+</div>
+
+<h2>8. 관련 파일</h2>
+<ul>
+<li>분석 스크립트: <a href="../../scripts/backtest_crypto_walkforward.py">scripts/backtest_crypto_walkforward.py</a></li>
+<li>결과: <code>data/backtest_crypto_walkforward_365d_20260528_132914.parquet / _summary.json</code></li>
+<li>운영 봇 (long-short): <a href="../../scripts/run_crypto_testnet.py">scripts/run_crypto_testnet.py</a></li>
+<li>이전 보고서: <a href="../2026-05-23/swing_optY_optZ_diagnosis.html">2026-05-23 옵션 Y/Z 진단</a></li>
+</ul>
+
+<h2>9. 용어 정리집</h2>
+<table>
+<tr><th>용어</th><th>한 줄 설명</th><th>본문에서의 역할</th></tr>
+<tr><td>walk-forward</td><td>시간 축을 따라 "과거로 정하고 안 본 미래로 검증" 을 한 칸씩 전진하며 반복</td><td>이번 분석의 방법 — 미래 훔쳐보기 함정 차단</td></tr>
+<tr><td>look-ahead bias (미래 훔쳐보기)</td><td>백테스트에서 미래 정보를 미리 알고 과거를 맞추는 오류</td><td>일반 백테스트의 함정, walk-forward 가 막는 대상</td></tr>
+<tr><td>overfitting (curve fitting)</td><td>특정 과거 기간에만 잘 맞도록 파라미터를 과도하게 맞춤 — 실전 재현 안 됨</td><td>look-ahead 의 결과, 가장 경계할 위험</td></tr>
+<tr><td>out-of-sample</td><td>모델 학습/최적화에 안 쓴 새 기간 데이터</td><td>walk-forward 의 검증 구간</td></tr>
+<tr><td>승률 (win rate)</td><td>전체 표본 중 +수익을 낸 비율</td><td>꾸준함의 핵심 지표 — 90%</td></tr>
+<tr><td>Sharpe ratio</td><td>위험 1 단위당 초과 수익. &gt;2 좋음, &gt;3 매우 좋음</td><td>각 윈도우 위험 대비 성과</td></tr>
+<tr><td>buy&amp;hold</td><td>그냥 사서 들고 있기 — 구간 시작가 대비 끝가 변화율</td><td>국면(추세/횡보) 분류 기준</td></tr>
+<tr><td>long-short</td><td>매수와 공매도 둘 다 — 상승/하락 양방향 추세를 다 잡음</td><td>sweep 우승자 B 의 모드, 횡보에서도 잘 된 이유</td></tr>
+<tr><td>mean reversion (평균 회귀)</td><td>가격이 평균에서 멀어지면 되돌아온다는 가정 — trend-follow 의 반대</td><td>저변동성 박스권 대비 전략 (다음 backtest 대상)</td></tr>
+<tr><td>realized volatility (실현 변동성)</td><td>실제 가격 변동의 표준편차 — "변동성이 살아있나 죽었나" 측정</td><td>다음 backtest 의 regime 재분류 기준</td></tr>
+<tr><td>funding rate</td><td>perpetual 선물에서 LONG/SHORT 사이 주기적으로 지불되는 비율</td><td>backtest 미반영 항목 — 실제 live 수익 차감 요소</td></tr>
+</table>
+
+</body>
+</html>

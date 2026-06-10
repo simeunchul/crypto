@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Crypto Swing 모드 — 옵션 A 즉시 교체 + 옵션 B 4h/1d sweep 결과</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; max-width: 1080px; margin: 28px auto; padding: 0 18px; color: #1d1d1f; line-height: 1.55; }
+  h1 { font-size: 26px; border-bottom: 2px solid #1d1d1f; padding-bottom: 6px; }
+  h2 { font-size: 21px; margin-top: 36px; border-left: 5px solid #007aff; padding-left: 10px; }
+  h3 { font-size: 17px; margin-top: 22px; }
+  .callout { background: #fff8e6; border-left: 5px solid #ffb800; padding: 12px 16px; margin: 16px 0; border-radius: 3px; }
+  .callout.win { background: #e6f7eb; border-left-color: #28a745; }
+  .callout.warn { background: #fde6e6; border-left-color: #dc3545; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13.5px; }
+  th, td { border: 1px solid #d0d5dd; padding: 6px 8px; text-align: right; }
+  th { background: #f5f6f8; text-align: center; }
+  td:first-child { text-align: left; }
+  .green { color: #28a745; font-weight: 600; }
+  .red { color: #dc3545; }
+  .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 13px; }
+  pre { background: #f5f6f8; padding: 12px; overflow-x: auto; font-size: 12.5px; border-radius: 3px; }
+  .tldr { background: #eef4ff; border: 1px solid #b6cffd; padding: 14px 18px; border-radius: 4px; margin: 18px 0; }
+  .diagram { background: #fafbfc; border: 1px solid #d0d5dd; padding: 14px; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; white-space: pre; overflow-x: auto; }
+</style>
+</head>
+<body>
+
+<h1>Crypto Swing 모드 — 옵션 A 즉시 교체 + 옵션 B 4h/1d sweep 결과</h1>
+<p class="mono">생성: 2026-05-22 · 작업자: simeunchul · 관련 sweep: <code>backtest_crypto_swing_365d_20260522_140121</code></p>
+
+<div class="callout win">
+<b>한 줄 결과.</b>
+운영 봇에 <b>swing 모드</b>(trailing-stop 청산)를 추가했고, 검증된 옵션 A (1h+6/24+Trail2, Sharpe +4.85 5종 평균) 가 <code>--mode swing</code> 한 줄로 즉시 가동된다.
+이어서 돌린 옵션 B (4h/1d sweep) 에서 <b>4h + 12h/48h MA + Trail2</b> 조합이 옵션 A 를 <b>모든 지표에서 이김</b> — 평균 Sharpe +6.29, 수익 +2295%, MDD −12.3%, 거래수 절반. 즉, 운영 default 를 4h 조합으로 한 단계 더 옮길 명백한 근거가 확보됐다.
+</div>
+
+<h2>1. 무엇을 시도했는지</h2>
+
+<h3>1-1. 시작점 — "지금 너무 평이하다, 스윙이라기엔..."</h3>
+<p>운영 중 코인 봇 (<code>run_crypto_testnet.py</code>) 은 1h봉 + 6/24 MA crossover + flip-on-signal 청산 단일 룰이었다. 평균 보유 6~24시간으로 short-term trend-follow 에 가까웠고, 백테스트에 만들어둔 8가지 룰 (funding, L/S, Bollinger, ATR trailing 등) 중 어느 것도 라이브에 wire-in 되지 않은 상태였다.</p>
+
+<h3>1-2. 두 갈래 진행</h3>
+<p><b>옵션 A — 검증된 값으로 운영봇 즉시 교체.</b> 사전 sweep 결과 1h+6/24 위에 Trail2 overlay (-2% trailing stop) 를 얹은 조합이 Sharpe +2.76, 수익 +72%, MDD −6.2% 로 압도. 같은 진입 신호에 청산 룰만 "신호 반전" → "고점 -2%" 로 바꾸면 swing 본질 (winners run) 충족.</p>
+<p><b>옵션 B — 4h/1d sweep 으로 더 진짜 swing 찾기.</b> 옵션 A 가 1h봉 그대로라는 점이 시간 스케일상 swing-답지 못함. 4h/1d × MA combos × exit rules 매트릭스를 5종 코인 × 365일 데이터로 돌려 우승자를 식별.</p>
+
+<h2>2. 옵션 A — 운영 봇 변경 사항</h2>
+
+<h3>2-1. CLI 변경</h3>
+<table>
+<tr><th>플래그</th><th>의미</th><th>default</th></tr>
+<tr><td><code>--mode {intraday, swing}</code></td><td>intraday=현재 동작 (FLIP 청산). swing=trailing stop 청산.</td><td>intraday</td></tr>
+<tr><td><code>--exit-rule {flip, trail}</code></td><td>명시 시 mode default override.</td><td>mode 따라</td></tr>
+<tr><td><code>--trail-pct</code></td><td>trail 폭 (고점 대비 -X%)</td><td>0.02 (2%)</td></tr>
+<tr><td><code>--interval</code></td><td>kline 봉 간격</td><td>1h</td></tr>
+</table>
+
+<h3>2-2. 동작 분기 (signal/action 처리)</h3>
+<div class="diagram">┌─────────────────────────────────────────────────────────┐
+│ tick 마다 symbol 별 처리                                  │
+│                                                          │
+│  [1] kline 페치 → MA 계산 → target_sig (∈ {-1,0,+1})    │
+│  [2] mark price 페치                                     │
+│  [3] exit-rule 분기                                       │
+│                                                          │
+│  ┌─ trail 모드 (current_position != 0) ─────────┐      │
+│  │   LONG : high_water = max(high_water, mark)      │     │
+│  │          mark < high_water * (1 - trail) → STOP  │     │
+│  │   SHORT: low_water  = min(low_water,  mark)      │     │
+│  │          mark > low_water  * (1 + trail) → STOP  │     │
+│  │   STOP → 시장가 청산, position=0                │     │
+│  └──────────────────────────────────────────────┘     │
+│                                                          │
+│  [4] 신호 액션                                            │
+│   ┌── flip ──────────────────┐  ┌── trail ───────────┐ │
+│   │ target ≠ current → FLIP   │  │ current==0 AND      │ │
+│   │ (반대 신호로 즉시 교체)    │  │ target ≠ 0 → OPEN   │ │
+│   │                          │  │ 보유 중엔 신호 무시  │ │
+│   └─────────────────────────┘  └────────────────────┘ │
+└─────────────────────────────────────────────────────────┘</div>
+
+<h3>2-3. SymbolState 확장</h3>
+<pre>@dataclass
+class SymbolState:
+    symbol: str
+    weight: float
+    current_position: int = 0
+    last_action_tick: int = -1
+    # trailing stop state (--exit-rule trail 일 때만 사용)
+    entry_price: float | None = None
+    high_water: float | None = None     # LONG: 진입 후 최고가
+    low_water:  float | None = None     # SHORT: 진입 후 최저가</pre>
+
+<h3>2-4. 운영 명령</h3>
+<pre># intraday (현재 그대로)
+python scripts/run_crypto_testnet.py --duration-hours 48
+
+# swing (옵션 A — 1h + 6/24 + Trail2, 검증된 +2.76 Sharpe)
+python scripts/run_crypto_testnet.py --mode swing --duration-hours 48
+
+# swing 변형 (옵션 B 우승자 — 4h + 12/48 + Trail2, 신규 +6.29 Sharpe)
+python scripts/run_crypto_testnet.py --mode swing --interval 4h \
+       --fast 12 --slow 48 --duration-hours 48</pre>
+
+<h2>3. 옵션 B — 4h/1d sweep 결과</h2>
+
+<h3>3-1. 매트릭스</h3>
+<table>
+<tr><th>축</th><th>값</th></tr>
+<tr><td>Intervals</td><td>4h (2190 bars/365d), 1d (343 bars/365d)</td></tr>
+<tr><td>MA combos</td><td>4h: 3/12, 5/20, 10/30, 20/60, 50/200 (실시간 12h~33d)<br>1d: 5/20, 10/30, 20/60, 50/200 (정통 swing/positional)</td></tr>
+<tr><td>Exit rules</td><td>flip (no overlay), trail2 (-2%), trail3 (-3%), trail5 (-5%), atr2, atr3</td></tr>
+<tr><td>Symbols</td><td>BTC, ETH, SOL, AVAX, BNB</td></tr>
+<tr><td>Strategy</td><td>B_trend (long-short)</td></tr>
+<tr><td>Baseline</td><td>옵션 A — 1h + 6/24 + Trail2</td></tr>
+</table>
+
+<h3>3-2. TOP 15 (Sharpe 기준)</h3>
+<table>
+<tr><th>#</th><th>scenario</th><th>symbol</th><th>int</th><th>ma_label</th><th>exit</th><th>ret%</th><th>Sharpe</th><th>maxDD%</th><th>trades</th></tr>
+<tr><td>1</td><td>swing</td><td>SOL</td><td>4h</td><td>12h/48h</td><td>trail2</td><td class="green">+3790.91</td><td class="green">+8.01</td><td>-9.49</td><td>384</td></tr>
+<tr><td>2</td><td>swing</td><td>AVAX</td><td>4h</td><td>12h/48h</td><td>trail2</td><td class="green">+4753.06</td><td class="green">+7.39</td><td>-12.23</td><td>384</td></tr>
+<tr><td>3</td><td>baseline A</td><td>AVAX</td><td>1h</td><td>6h/24h</td><td>trail2</td><td>+4984.85</td><td>+7.27</td><td>-15.03</td><td>754</td></tr>
+<tr><td>4</td><td>swing</td><td>ETH</td><td>4h</td><td>12h/48h</td><td>trail2</td><td class="green">+2126.06</td><td class="green">+7.04</td><td>-9.57</td><td>343</td></tr>
+<tr><td>5</td><td>baseline A</td><td>SOL</td><td>1h</td><td>6h/24h</td><td>trail2</td><td>+3201.45</td><td>+6.97</td><td>-15.89</td><td>721</td></tr>
+<tr><td>6</td><td>swing</td><td>ETH</td><td>4h</td><td>20h/80h</td><td>trail2</td><td>+1192.99</td><td>+6.77</td><td>-10.30</td><td>225</td></tr>
+<tr><td>7</td><td>swing</td><td>AVAX</td><td>4h</td><td>12h/48h</td><td>trail3</td><td>+3138.23</td><td>+5.87</td><td>-33.08</td><td>343</td></tr>
+<tr><td>8</td><td>swing</td><td>SOL</td><td>4h</td><td>12h/48h</td><td>trail3</td><td>+2085.14</td><td>+5.72</td><td>-22.68</td><td>337</td></tr>
+<tr><td>9</td><td>baseline A</td><td>ETH</td><td>1h</td><td>6h/24h</td><td>trail2</td><td>+1384.79</td><td>+5.65</td><td>-13.22</td><td>705</td></tr>
+<tr><td>10</td><td>swing</td><td>AVAX</td><td>4h</td><td>20h/80h</td><td>trail2</td><td>+723.31</td><td>+5.62</td><td>-16.09</td><td>248</td></tr>
+</table>
+
+<p>TOP 4 중 3개가 옵션 B (4h+12h/48h+Trail2). 옵션 A 도 상위권에 있지만 동일 코인 대비 항상 옵션 B 가 위에 위치.</p>
+
+<h3>3-3. 평균 (5종 코인) — interval × MA × exit_rule 단위</h3>
+<table>
+<tr><th>순위</th><th>interval</th><th>MA</th><th>exit</th><th>avg ret%</th><th>avg Sharpe</th><th>avg DD%</th><th>avg trades</th></tr>
+<tr><td class="green">★1</td><td>4h</td><td>12h/48h</td><td>trail2</td><td class="green">+2294.55</td><td class="green">+6.29</td><td>-12.28</td><td>347</td></tr>
+<tr><td>2</td><td>4h</td><td>20h/80h</td><td>trail2</td><td>+606.55</td><td>+5.15</td><td>-13.01</td><td>233</td></tr>
+<tr><td>3</td><td>4h</td><td>12h/48h</td><td>trail3</td><td>+1368.59</td><td>+4.34</td><td>-24.08</td><td>301</td></tr>
+<tr><td>4</td><td>4h</td><td>40h/120h</td><td>trail2</td><td>+226.20</td><td>+3.96</td><td>-10.29</td><td>170</td></tr>
+<tr><td>5</td><td>4h</td><td>20h/80h</td><td>trail3</td><td>+516.81</td><td>+3.89</td><td>-19.78</td><td>211</td></tr>
+<tr><td>...</td><td colspan="7" style="text-align:center;">(중략, 53개 조합 중 일부)</td></tr>
+<tr><td>꼴찌</td><td>4h</td><td>40h/120h</td><td>flip</td><td class="red">-37.18</td><td class="red">-0.55</td><td>-57.98</td><td>91</td></tr>
+</table>
+
+<h3>3-4. 핵심 차트 — 옵션 A vs 옵션 B (5종 평균)</h3>
+<svg viewBox="0 0 780 320" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace, Consolas, monospace" font-size="11">
+  <!-- Axes -->
+  <line x1="80" y1="20" x2="80" y2="260" stroke="#333" stroke-width="1"/>
+  <line x1="80" y1="260" x2="760" y2="260" stroke="#333" stroke-width="1"/>
+
+  <!-- Title -->
+  <text x="390" y="14" font-size="13" font-weight="bold" text-anchor="middle">옵션 A vs 옵션 B — 5종 평균 Sharpe</text>
+
+  <!-- Y axis labels -->
+  <text x="74" y="263" text-anchor="end">0</text>
+  <text x="74" y="223" text-anchor="end">2</text>
+  <text x="74" y="183" text-anchor="end">4</text>
+  <text x="74" y="143" text-anchor="end">6</text>
+  <text x="74" y="103" text-anchor="end">8</text>
+  <text x="74" y="63" text-anchor="end">10</text>
+  <text x="46" y="146" transform="rotate(-90,46,146)" text-anchor="middle">Sharpe</text>
+
+  <!-- Reference lines -->
+  <line x1="80" y1="200" x2="760" y2="200" stroke="#aaa" stroke-dasharray="3,3"/>
+  <text x="762" y="203" fill="#888">Sharpe=3 (목표선)</text>
+  <line x1="80" y1="220" x2="760" y2="220" stroke="#ccc" stroke-dasharray="2,3"/>
+  <text x="762" y="223" fill="#aaa">Sharpe=2</text>
+
+  <!-- Bars: [label, sharpe (avg), color] -->
+  <!-- Each bar width 90, gap 10 -->
+  <!-- Bar 1: 옵션 A baseline (1h+6/24+Trail2) -->
+  <rect x="110" y="163" width="60" height="97" fill="#6b7280"/>
+  <text x="140" y="275" text-anchor="middle">옵션 A</text>
+  <text x="140" y="288" text-anchor="middle" fill="#666">1h+6/24+T2</text>
+  <text x="140" y="160" text-anchor="middle" font-weight="bold">+4.85</text>
+
+  <!-- Bar 2: 옵션 B 우승자 (4h+12/48+Trail2) -->
+  <rect x="200" y="134" width="60" height="126" fill="#28a745"/>
+  <text x="230" y="275" text-anchor="middle" font-weight="bold">★ 옵션 B</text>
+  <text x="230" y="288" text-anchor="middle" fill="#666">4h+12/48+T2</text>
+  <text x="230" y="131" text-anchor="middle" font-weight="bold" fill="#28a745">+6.29</text>
+
+  <!-- Bar 3: 4h+20/80+T2 (2위) -->
+  <rect x="290" y="157" width="60" height="103" fill="#90c699"/>
+  <text x="320" y="275" text-anchor="middle">4h 20/80 T2</text>
+  <text x="320" y="288" text-anchor="middle" fill="#666"></text>
+  <text x="320" y="154" text-anchor="middle">+5.15</text>
+
+  <!-- Bar 4: 4h+12/48+T3 -->
+  <rect x="380" y="173" width="60" height="87" fill="#90c699"/>
+  <text x="410" y="275" text-anchor="middle">4h 12/48 T3</text>
+  <text x="410" y="170" text-anchor="middle">+4.34</text>
+
+  <!-- Bar 5: 1d+5/20+T2 -->
+  <rect x="470" y="207" width="60" height="53" fill="#bfd9c5"/>
+  <text x="500" y="275" text-anchor="middle">1d 5/20 T2</text>
+  <text x="500" y="204" text-anchor="middle">+2.68</text>
+
+  <!-- Bar 6: 4h+12/48+flip (overlay 없을 때 — 비교용) -->
+  <rect x="560" y="256" width="60" height="4" fill="#dc3545"/>
+  <text x="590" y="275" text-anchor="middle">4h 12/48 flip</text>
+  <text x="590" y="252" text-anchor="middle" fill="#dc3545">+0.20</text>
+
+  <!-- Bar 7: 1d+50/200+flip (전통 골든크로스 — flip) -->
+  <rect x="650" y="253" width="60" height="7" fill="#dc3545"/>
+  <text x="680" y="275" text-anchor="middle">1d 50/200 flip</text>
+  <text x="680" y="288" text-anchor="middle" fill="#666">(전통 G.C.)</text>
+  <text x="680" y="249" text-anchor="middle" fill="#dc3545">+0.33</text>
+</svg>
+
+<h3>3-5. 한눈에 보는 비교 (옵션 A baseline vs 옵션 B 우승자)</h3>
+<table>
+<tr><th>지표</th><th>옵션 A (1h+6/24+T2)</th><th>옵션 B ★ (4h+12/48+T2)</th><th>차이</th></tr>
+<tr><td>avg Sharpe (5종)</td><td>+4.85</td><td class="green"><b>+6.29</b></td><td class="green">+30%</td></tr>
+<tr><td>avg 수익률</td><td>+1,963%</td><td class="green"><b>+2,295%</b></td><td class="green">+332%p</td></tr>
+<tr><td>avg MDD (최대 손실)</td><td>-16.9%</td><td class="green"><b>-12.3%</b></td><td class="green">-4.6%p (더 안전)</td></tr>
+<tr><td>avg 거래수 (365d)</td><td>679</td><td class="green"><b>347</b></td><td class="green">-49% (수수료 절감)</td></tr>
+<tr><td>BTC Sharpe</td><td>+1.98</td><td>(상세 sweep 결과 참조)</td><td>—</td></tr>
+<tr><td>ETH Sharpe</td><td>+5.65</td><td><b>+7.04</b></td><td class="green">+25%</td></tr>
+<tr><td>SOL Sharpe</td><td>+6.97</td><td><b>+8.01</b></td><td class="green">+15%</td></tr>
+<tr><td>AVAX Sharpe</td><td>+7.27</td><td><b>+7.39</b></td><td class="green">+2%</td></tr>
+<tr><td>BNB Sharpe</td><td>+2.41</td><td><b>+5.00</b></td><td class="green">+107%</td></tr>
+</table>
+
+<h3>3-6. 직관적 해석 — "왜 4h+12h/48h+Trail2 가 더 나은가"</h3>
+<div class="callout">
+<b>이유 1 — 봉 사이즈가 신호 노이즈를 자연 필터링.</b>
+1h봉 6/24 MA는 평균 6~24시간짜리 추세를 잡는다. 4h봉 12/48은 평균 48~192시간짜리 추세 = 2~8일.
+잡신호가 4배 적게 들어와서 거래수가 679 → 347 (-49%) 로 떨어지고, 수수료가 그만큼 절감된다.
+</div>
+<div class="callout">
+<b>이유 2 — Trail2 가 swing 본질을 만든다 (옵션 A의 핵심 통찰 그대로).</b>
+신호 반전이 와도 trail 에 닿기 전엔 안 판다 → 강한 추세 때 며칠~수주 보유 → "winners run".
+flip 룰만 쓰는 4h+12/48 은 Sharpe +0.20 (사실상 0). 같은 진입 신호인데 청산 룰 하나로 ×30 차이.
+</div>
+<div class="callout warn">
+<b>주의 — 1d 봉 + 50/200 (전통 골든크로스)은 잘 안 됨.</b>
+정통 swing/positional 의 대표 골든크로스 (50d/200d) 는 365일에 신호가 1~3번밖에 안 나와 Sharpe +0.20~+0.33.
+"느린 봉 + 느린 MA = 정통 swing" 이라는 인식과 다르게, 코인 시장의 변동성 사이클은 그보다 짧다 (4h × 12/48 = 2~8일 사이클이 최적).
+</div>
+
+<h2>4. 의사결정 — 운영 default 를 어떻게 둘까</h2>
+
+<table>
+<tr><th>선택지</th><th>운영 명령</th><th>근거</th><th>리스크</th></tr>
+<tr><td>① 옵션 A 그대로 (보수)</td><td><code>--mode swing</code></td><td>옵션 A 검증된 +2.76 Sharpe (60d sweep 기준)<br>전 sweep 평균 +4.85 (365d, 이번)</td><td>옵션 B 우승자보다 30% 낮음</td></tr>
+<tr><td>② 옵션 B 우승자로 교체 (적극)</td><td><code>--mode swing --interval 4h --fast 12 --slow 48</code></td><td>모든 지표에서 옵션 A 압도<br>(Sharpe +30%, DD -4.6%p, trades -49%)</td><td>단일 365일 백테스트 의존 — out-of-sample 미검증<br>코인 강세장 효과 가능성</td></tr>
+<tr><td>③ swing 모드 default 자체를 4h+12/48 로 변경</td><td><code>--mode swing</code> 한 줄로 우승자 가동</td><td>매번 긴 옵션 입력 안 함, 안전</td><td>코드 default 변경 = 향후 1h 사용자가 명시적으로 옵션 줘야 함</td></tr>
+</table>
+
+<h2>5. 비전공자용 요약 (TL;DR)</h2>
+<div class="tldr">
+<ol>
+<li><b>지금 코인 봇은 "1시간봉 보고 평균선 신호로 자주 사고팔기"</b> — 평균 6~24시간 보유. 너무 짧아서 swing 이라 부르기 어색.</li>
+<li><b>옵션 A: 청산 룰만 바꿔도 swing 다워짐.</b>
+"신호 반전이면 즉시 매도" → "고점에서 -2% 빠지면 매도" 로 바꾸면 강한 추세 때 며칠~수주 보유 가능.
+365일 백테스트에서 평균 수익 +1,963%, 최악 손실 -17%.</li>
+<li><b>옵션 B: 봉을 1h → 4h로 늘리고 평균선도 같이 늘리면 한 단계 더 좋아짐.</b>
+4h봉 12/48 평균선 + 같은 트레일링 청산 = 평균 수익 +2,295%, 최악 손실 -12%, 거래 횟수 절반 (수수료 절감).</li>
+<li><b>의외의 발견 — 정통 swing (일봉 50/200 골든크로스) 은 코인에선 잘 안 된다.</b>
+신호가 너무 가끔 나와서 한 번 틀리면 회복할 기회가 없음. 코인 변동 사이클은 일봉보다 빠르다.</li>
+<li><b>지금 운영 봇은 <code>--mode swing</code> 한 줄로 옵션 A 가동 가능</b>, 한 번 더 <code>--interval 4h --fast 12 --slow 48</code> 붙이면 옵션 B 가동.</li>
+</ol>
+</div>
+
+<h2>6. 관련 파일 / 커밋</h2>
+<ul>
+<li>운영 봇: <a href="../../scripts/run_crypto_testnet.py">scripts/run_crypto_testnet.py</a> (수정 — mode/exit-rule/trail-pct/interval CLI + trail state)</li>
+<li>Sweep 스크립트: <a href="../../scripts/backtest_crypto_swing_sweep.py">scripts/backtest_crypto_swing_sweep.py</a> (신규)</li>
+<li>Sweep 결과: <code>data/backtest_crypto_swing_365d_20260522_140121.parquet</code>, <code>..._summary.json</code></li>
+<li>Sweep 콘솔 로그: <code>data/swing_sweep_run.log</code></li>
+<li>재사용 모듈:
+  <ul>
+    <li><code>autotrader.backtest.crypto_strategies</code> — strat_trend, apply_risk_overlay, apply_atr_trailing, backtest, summarize</li>
+    <li><code>autotrader.data.crypto_bars</code> — fetch_crypto_bars (4h/1d 지원)</li>
+  </ul>
+</li>
+</ul>
+
+<h2>7. 용어 정리집</h2>
+<table>
+<tr><th>용어</th><th>한 줄 설명</th><th>본문에서의 역할</th></tr>
+<tr><td>MA crossover</td><td>단기 평균선이 장기 평균선을 위/아래로 가로지를 때 매수/매도 신호</td><td>두 모드 모두 진입 신호의 기반</td></tr>
+<tr><td>FLIP 청산</td><td>반대 신호가 나오는 즉시 청산하고 포지션 뒤집기</td><td>intraday 모드의 청산 방식 — 휩쏘에 취약</td></tr>
+<tr><td>Trailing stop (Trail2)</td><td>진입 후 최고점이 갱신될 때마다 청산선을 -2% 지점에 따라 올림. 가격이 청산선 닿으면 매도.</td><td>swing 모드의 청산 방식 — 강한 추세 때 winners run 가능</td></tr>
+<tr><td>Sharpe ratio</td><td>위험 1 단위당 초과 수익. &gt;1=쓸만, &gt;2=매우 좋음, &gt;3=예외적</td><td>전략 비교의 1순위 지표</td></tr>
+<tr><td>MDD (Max Drawdown)</td><td>자산 곡선이 정점 대비 가장 깨졌을 때의 손실 폭</td><td>운영 시 실제 견딜 만한지 가늠하는 지표</td></tr>
+<tr><td>ATR (Average True Range)</td><td>최근 N일 평균 변동폭. 코인마다 다른 변동성에 맞춰 트레일 폭을 조정할 때 사용</td><td>exit 룰 중 atr2/atr3 의 기반 — 이번 sweep 에선 trail2 보다 성과 낮음</td></tr>
+<tr><td>골든크로스 (Golden Cross)</td><td>50일 평균선이 200일 평균선 위로 뚫는 것 — 전통 swing/positional 매수 시그널</td><td>1d 50/200 조합 — 코인에선 잘 안 됨이 검증됨</td></tr>
+<tr><td>winners run</td><td>이긴 트레이드를 일찍 청산하지 않고 추세 끝까지 들고 가는 swing trading 본질</td><td>옵션 A/B 가 옵션 intraday 대비 우월한 핵심 이유</td></tr>
+<tr><td>휩쏘 (whipsaw)</td><td>신호가 빠르게 왔다갔다 해 진입→손해→청산→재진입을 반복하는 현상</td><td>flip 룰의 약점, swing/trail 룰이 막아줌</td></tr>
+<tr><td>USDT-M perpetual</td><td>USDT 마진 무기한 선물. Binance 의 코인 선물 표준 상품</td><td>Sweep/운영 모두 이 시장에서 진행</td></tr>
+<tr><td>out-of-sample</td><td>모델 학습에 안 쓴 새 기간 데이터로 성과 검증하기</td><td>옵션 B 결과에 남아있는 검증 과제 — 다른 기간이나 강세장이 아닌 구간에서도 재현되는지</td></tr>
+</table>
+
+</body>
+</html>

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Crypto — Trend vs Mean-Reversion walk-forward (횡보장에 MR 이 필요한가)</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; max-width: 1100px; margin: 28px auto; padding: 0 18px; color: #1d1d1f; line-height: 1.55; }
+  h1 { font-size: 26px; border-bottom: 2px solid #1d1d1f; padding-bottom: 6px; }
+  h2 { font-size: 21px; margin-top: 36px; border-left: 5px solid #007aff; padding-left: 10px; }
+  h3 { font-size: 17px; margin-top: 22px; }
+  .callout { background: #fff8e6; border-left: 5px solid #ffb800; padding: 12px 16px; margin: 16px 0; border-radius: 3px; }
+  .callout.win  { background: #e6f7eb; border-left-color: #28a745; }
+  .callout.warn { background: #fde6e6; border-left-color: #dc3545; }
+  .callout.info { background: #e7f1ff; border-left-color: #007aff; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13.5px; }
+  th, td { border: 1px solid #d0d5dd; padding: 6px 8px; text-align: right; }
+  th { background: #f5f6f8; text-align: center; }
+  td:first-child, td.label { text-align: left; }
+  .green { color: #28a745; font-weight: 600; }
+  .red { color: #dc3545; font-weight: 600; }
+  .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 13px; }
+  pre { background: #f5f6f8; padding: 12px; overflow-x: auto; font-size: 12.5px; border-radius: 3px; }
+  .tldr { background: #eef4ff; border: 1px solid #b6cffd; padding: 14px 18px; border-radius: 4px; margin: 18px 0; }
+  .diagram { background: #fafbfc; border: 1px solid #d0d5dd; padding: 14px; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; white-space: pre; overflow-x: auto; }
+</style>
+</head>
+<body>
+
+<h1>Crypto — Trend vs Mean-Reversion walk-forward</h1>
+<p class="mono">생성: 2026-05-28 · 작업자: simeunchul · 관련: <code>backtest_crypto_trend_vs_mr_365d_20260528_133641</code></p>
+
+<div class="callout warn">
+<b>한 줄 결과.</b>
+질문은 "횡보장에서도 먹으려면 mean-reversion(MR) 이 필요한가". 365일을 30일 윈도우로 쪼개고 변동성 분위수로 LOW/MID/HIGH 국면을 나눠 trend-follow vs Bollinger MR 을 비교한 결과 — <b>모든 변동성 국면에서 TREND 가 MR 을 압도</b>. 저변동성(LOW_VOL)에서조차 TREND +6.75% vs MR +1.74%. MR 전체 승률 48% (동전 던지기). <b>결론: 코인에선 횡보용 MR 추가가 불필요. regime-switching 무의미. 현재 long-short trend 유지가 최선.</b>
+</div>
+
+<h2>1. 무엇을 검증했는지</h2>
+<p>이전 walk-forward 에서 "횡보(RANGE) 구간도 trend 가 +9.55% 로 잘 먹는다" 는 의외의 결과가 나왔다. 단 그 RANGE 는 buy&amp;hold 기준 (30일 시작=끝) 이라 "변동성 있는 횡보" 였다. 진짜 위험인 <b>"저변동성 박스권"</b> 에서는 trend 가 약하고 mean-reversion 이 나을 수 있다는 가설을 검증.</p>
+
+<table>
+<tr><th>항목</th><th>값</th></tr>
+<tr><td class="label">비교 A — TREND</td><td>long-short 4h+12/48 + trail-2% (현 운영 봇)</td></tr>
+<tr><td class="label">비교 B — MR</td><td>Bollinger 20/2σ mean-reversion (상단 SHORT, 하단 LONG, 중심 복귀 청산)</td></tr>
+<tr><td class="label">기간/윈도우</td><td>365일 / 30일 비중첩 11개</td></tr>
+<tr><td class="label">종목</td><td>10종 (BTC ETH SOL AVAX BNB OP SUI NEAR INJ ARB)</td></tr>
+<tr><td class="label">국면 분류</td><td>실현변동성(realized vol) 분위수: LOW ≤ 0.66 &lt; MID ≤ 0.84 &lt; HIGH (연환산)</td></tr>
+</table>
+
+<h2>2. 결과 — 변동성 국면별 (핵심)</h2>
+<table>
+<tr><th rowspan="2">변동성 국면</th><th rowspan="2">표본</th><th colspan="3">TREND</th><th colspan="3">MR</th><th rowspan="2">승자</th></tr>
+<tr><th>수익%</th><th>Sharpe</th><th>승률</th><th>수익%</th><th>Sharpe</th><th>승률</th></tr>
+<tr><td class="label">LOW_VOL</td><td>36</td><td class="green">+6.75</td><td>+3.20</td><td>88.9%</td><td>+1.74</td><td>+0.96</td><td>58.3%</td><td class="green">TREND</td></tr>
+<tr><td class="label">MID_VOL</td><td>38</td><td class="green">+9.10</td><td>+3.37</td><td>89.5%</td><td class="red">-0.61</td><td>+0.18</td><td>42.1%</td><td class="green">TREND</td></tr>
+<tr><td class="label">HIGH_VOL</td><td>36</td><td class="green">+11.74</td><td>+4.18</td><td>91.7%</td><td class="red">-0.53</td><td>+0.20</td><td>44.4%</td><td class="green">TREND</td></tr>
+</table>
+
+<div class="callout warn">
+<b>저변동성(LOW_VOL)에서조차 TREND(+6.75%) > MR(+1.74%).</b>
+횡보장에 MR 이 나을 거라는 가설이 데이터로 기각됨. MR 은 어느 국면에서도 trend 를 못 이김.
+</div>
+
+<h3>2-1. 차트 — 국면별 TREND vs MR 수익률</h3>
+<svg viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace, Consolas, monospace" font-size="11">
+  <line x1="70" y1="20" x2="70" y2="230" stroke="#333"/>
+  <line x1="70" y1="170" x2="700" y2="170" stroke="#333"/>
+  <text x="385" y="14" font-size="13" font-weight="bold" text-anchor="middle">변동성 국면별 평균 수익률 — TREND vs MR</text>
+
+  <!-- Y: 0 at y=170, +12 at y=50 → 10px/unit -->
+  <text x="64" y="173" text-anchor="end">0</text>
+  <text x="64" y="120" text-anchor="end">+5</text>
+  <text x="64" y="70" text-anchor="end">+10</text>
+  <text x="64" y="200" text-anchor="end">-3</text>
+
+  <!-- LOW_VOL group -->
+  <text x="160" y="250" text-anchor="middle" font-weight="bold">LOW_VOL</text>
+  <rect x="120" y="103" width="40" height="67" fill="#28a745"/>
+  <text x="140" y="99" text-anchor="middle" font-size="10">+6.75</text>
+  <text x="140" y="263" text-anchor="middle" font-size="9" fill="#666">TREND</text>
+  <rect x="170" y="153" width="40" height="17" fill="#90c699"/>
+  <text x="190" y="149" text-anchor="middle" font-size="10">+1.74</text>
+  <text x="190" y="263" text-anchor="middle" font-size="9" fill="#666">MR</text>
+
+  <!-- MID_VOL group -->
+  <text x="360" y="250" text-anchor="middle" font-weight="bold">MID_VOL</text>
+  <rect x="320" y="79" width="40" height="91" fill="#28a745"/>
+  <text x="340" y="75" text-anchor="middle" font-size="10">+9.10</text>
+  <text x="340" y="263" text-anchor="middle" font-size="9" fill="#666">TREND</text>
+  <rect x="370" y="170" width="40" height="6" fill="#dc3545"/>
+  <text x="390" y="190" text-anchor="middle" font-size="10" fill="#dc3545">-0.61</text>
+  <text x="390" y="263" text-anchor="middle" font-size="9" fill="#666">MR</text>
+
+  <!-- HIGH_VOL group -->
+  <text x="560" y="250" text-anchor="middle" font-weight="bold">HIGH_VOL</text>
+  <rect x="520" y="53" width="40" height="117" fill="#1a7a32"/>
+  <text x="540" y="49" text-anchor="middle" font-size="10">+11.74</text>
+  <text x="540" y="263" text-anchor="middle" font-size="9" fill="#666">TREND</text>
+  <rect x="570" y="170" width="40" height="5" fill="#dc3545"/>
+  <text x="590" y="188" text-anchor="middle" font-size="10" fill="#dc3545">-0.53</text>
+  <text x="590" y="263" text-anchor="middle" font-size="9" fill="#666">MR</text>
+
+  <!-- legend -->
+  <rect x="70" y="282" width="12" height="10" fill="#28a745"/><text x="86" y="291">TREND (long-short)</text>
+  <rect x="240" y="282" width="12" height="10" fill="#90c699"/><text x="256" y="291">MR (Bollinger)</text>
+</svg>
+
+<h2>3. 전체 비교</h2>
+<table>
+<tr><th>전략</th><th>평균 수익%</th><th>평균 Sharpe</th><th>승률</th></tr>
+<tr><td class="label">TREND (long-short)</td><td class="green">+9.19</td><td class="green">+3.58</td><td class="green">90.0%</td></tr>
+<tr><td class="label">MR (Bollinger)</td><td>+0.19</td><td>+0.44</td><td class="red">48.2%</td></tr>
+</table>
+<p>MR 승률 48.2% = 동전 던지기. 어느 국면에서도 안정적 수익을 못 냄.</p>
+
+<h2>4. 왜 MR 이 코인에서 안 되는가</h2>
+<div class="callout">
+<b>이유 1 — 코인은 trending &gt; mean-reverting.</b>
+Bollinger MR 은 "박스권 상단 닿으면 곧 되돌아온다" 베팅. 그러나 코인은 한 방향으로 길게 가는 일이 잦아, 상단에서 SHORT 했다가 추세에 깔려 큰 손실.
+</div>
+<div class="callout">
+<b>이유 2 — 코인엔 "진짜 저변동성" 이 거의 없음.</b>
+LOW_VOL 분위수도 연환산 변동성 66% — 주식(15~20%)의 3배 이상. 코인은 가장 잠잠한 구간조차 추세가 생긴다. mean-reversion 이 노릴 "좁은 박스권 정체" 가 부재.
+</div>
+<div class="callout">
+<b>이유 3 — "변동성 있는 횡보" 는 이미 trend 가 먹고 있음.</b>
+30일 buy&amp;hold 가 0 이어도 그 안에 상승→하락 swing 이 있으면 long-short trend 가 양방향으로 다 잡는다. MR 이 끼어들 자리가 없음.
+</div>
+
+<h2>5. 사용자 질문의 최종 답</h2>
+<div class="diagram">Q: 횡보장에서도 먹으려면 mean-reversion 이 필요한가?
+
+A: ❌ 아니오. 코인에선 모든 변동성 국면에서 trend-follow 가 우월.
+   - LOW_VOL  : TREND +6.75% > MR +1.74%
+   - MID_VOL  : TREND +9.10% > MR -0.61%
+   - HIGH_VOL : TREND +11.74% > MR -0.53%
+
+   → regime-switching (추세→trend, 횡보→MR) 무의미
+   → 횡보용 MR 추가 불필요
+   → 현재 long-short trend 유지가 최선
+   → "횡보에서도 먹기" 는 이미 long-short 가 swing 으로 하고 있음</div>
+
+<h2>6. 비전공자용 요약 (TL;DR)</h2>
+<div class="tldr">
+<ol>
+<li><b>"횡보장 대응으로 mean-reversion(평균 회귀) 을 추가하면 좋을까?" 를 데이터로 검증.</b></li>
+<li><b>365일을 변동성 높낮이로 3등분 → 각 구간에서 trend vs MR 비교.</b></li>
+<li><b>모든 구간에서 trend 가 압승. MR 은 거의 0 수익 (승률 48% = 운).</b></li>
+<li><b>이유: 코인은 한 방향으로 길게 가는 성질(추세) 이 강하고, "잠잠한 박스권" 자체가 거의 없다.</b></li>
+<li><b>결론: 횡보용 MR 추가 불필요. 지금 long-short trend 봇 그대로가 최선.</b>
+   "횡보에서도 먹기" 는 이미 long-short 가 양방향으로 하고 있다.</li>
+</ol>
+</div>
+
+<h2>7. 관련 파일</h2>
+<ul>
+<li>분석 스크립트: <a href="../../scripts/backtest_crypto_trend_vs_mr_wf.py">scripts/backtest_crypto_trend_vs_mr_wf.py</a></li>
+<li>결과: <code>data/backtest_crypto_trend_vs_mr_365d_20260528_133641.parquet / _summary.json</code></li>
+<li>MR 전략 코드: <code>autotrader.backtest.crypto_strategies.strat_bollinger_mr</code></li>
+<li>직전 보고서: <a href="swing_walkforward.html">swing_walkforward.html</a> (수익이 일시적인가 꾸준한가)</li>
+</ul>
+
+<h2>8. 용어 정리집</h2>
+<table>
+<tr><th>용어</th><th>한 줄 설명</th><th>본문에서의 역할</th></tr>
+<tr><td>mean reversion (평균 회귀)</td><td>가격이 평균에서 멀어지면 되돌아온다는 가정의 전략. trend-follow 의 반대</td><td>이번 검증의 비교 대상 — 코인에선 부적합 판명</td></tr>
+<tr><td>Bollinger Band</td><td>20일 평균선 ± 2σ 밴드. 상단/하단 = 통계적 과매수/과매도 영역</td><td>MR 전략의 진입/청산 기준</td></tr>
+<tr><td>trend-following (추세 추종)</td><td>오르면 사고 내리면 판다 — 추세가 지속된다는 가정</td><td>현 운영 봇 (long-short), 모든 국면 우월</td></tr>
+<tr><td>realized volatility (실현 변동성)</td><td>실제 가격 변동의 표준편차 (연환산). "변동성이 살아있나 죽었나" 측정</td><td>국면(LOW/MID/HIGH) 분류 기준</td></tr>
+<tr><td>분위수 (quantile)</td><td>데이터를 크기순 정렬해 비율로 자르는 경계값 (33%, 67% 등)</td><td>변동성 국면을 상대적으로 3등분</td></tr>
+<tr><td>regime-switching (국면 전환)</td><td>시장 국면에 따라 전략을 바꾸는 것 (추세장→trend, 횡보장→MR)</td><td>이번 검증으로 코인엔 불필요 판명</td></tr>
+<tr><td>승률 (win rate)</td><td>전체 표본 중 +수익 비율. 50% = 동전 던지기</td><td>MR 48% = 무의미, TREND 90% = 강건</td></tr>
+<tr><td>walk-forward</td><td>시간을 쪼개 순서대로 구간별 성과를 보는 검증법</td><td>이번 비교의 방법론</td></tr>
+<tr><td>저변동성 박스권</td><td>가격이 좁은 범위에서 거의 안 움직이는 정체 구간</td><td>MR 이 노리는 환경 — 코인엔 거의 없음 (LOW_VOL 도 연 66%)</td></tr>
+</table>
+
+</body>
+</html>

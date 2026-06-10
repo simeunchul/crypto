@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Crypto Swing — 옵션 Y/Z 진단 + long-short 가설 발견</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; max-width: 1100px; margin: 28px auto; padding: 0 18px; color: #1d1d1f; line-height: 1.55; }
+  h1 { font-size: 26px; border-bottom: 2px solid #1d1d1f; padding-bottom: 6px; }
+  h2 { font-size: 21px; margin-top: 36px; border-left: 5px solid #007aff; padding-left: 10px; }
+  h3 { font-size: 17px; margin-top: 22px; }
+  .callout { background: #fff8e6; border-left: 5px solid #ffb800; padding: 12px 16px; margin: 16px 0; border-radius: 3px; }
+  .callout.win  { background: #e6f7eb; border-left-color: #28a745; }
+  .callout.warn { background: #fde6e6; border-left-color: #dc3545; }
+  .callout.info { background: #e7f1ff; border-left-color: #007aff; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13.5px; }
+  th, td { border: 1px solid #d0d5dd; padding: 6px 8px; text-align: right; }
+  th { background: #f5f6f8; text-align: center; }
+  td:first-child, td.label { text-align: left; }
+  .green { color: #28a745; font-weight: 600; }
+  .red { color: #dc3545; }
+  .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 13px; }
+  pre { background: #f5f6f8; padding: 12px; overflow-x: auto; font-size: 12.5px; border-radius: 3px; }
+  .tldr { background: #eef4ff; border: 1px solid #b6cffd; padding: 14px 18px; border-radius: 4px; margin: 18px 0; }
+  .diagram { background: #fafbfc; border: 1px solid #d0d5dd; padding: 14px; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; white-space: pre; overflow-x: auto; }
+</style>
+</head>
+<body>
+
+<h1>Crypto Swing — 옵션 Y/Z 진단 + long-short 가설 발견</h1>
+<p class="mono">생성: 2026-05-23 · 작업자: simeunchul · 관련: <code>backtest_crypto_optY_60d_20260523_170511</code></p>
+
+<div class="callout warn">
+<b>한 줄 결과.</b>
+어제 -$300 손실 → 옵션 Y (closed-bar 신호 + 차단 플래그) 적용 → 1시간 운영 결과 7종 trail-stop (지갑 -413) → 5m polling backtest 로 옵션 Y 가 backtest B (Sharpe +2.73) 보다 압도적으로 나쁨을 확인 (Sharpe -0.29) → 옵션 Z (trail 도 봉 마감만) 도 비슷하게 나쁨 (-0.07). 진단 결과 <b>sweep 우승자 B 는 long-short 모드, live 봇은 long-only — 차단 후 회전 메커니즘이 작동 안 함</b>. 이게 backtest 와 live 의 근본 격차 원인.
+</div>
+
+<h2>1. 무엇을 시도했는지</h2>
+
+<h3>1-1. 시작점 — 어제 -$300 손실</h3>
+<p>swing 모드 18종 + 5분 polling + trail-2% 로 24시간 운영 결과 <code>지갑 11,032 → 10,725 USDT (-$307)</code>. log 분석 결과 24시간에 trail-stop 45회 + OPEN 49회 — 평균 15분마다 한 번 매매. NEAR/INJ 같은 신흥 알트가 같은 종목을 13/11번 trail-OPEN 반복하는 명백한 휩쏘.</p>
+
+<h3>1-2. 옵션 Y 적용 (closed-bar 신호 + 차단 플래그)</h3>
+<p>휩쏘 원인 2가지 가설로 진단:</p>
+<ul>
+<li>매 5m polling 시 진행 중인 4h 봉의 잠정 close 로 MA 재계산 → 봉 안 신호 흔들림</li>
+<li>trail 발동 후 즉시 같은 신호로 재진입 (차단 메커니즘 부재)</li>
+</ul>
+<p>둘 다 fix:</p>
+<ul>
+<li><code>closed_kl = [k for k in kl if open_time + 4h <= now]</code> — 진행 중 봉 제외</li>
+<li><code>stopped_until_signal_change</code> 도입 — trail 발동 후 같은 방향 신호로 차단</li>
+</ul>
+
+<h3>1-3. 옵션 Y 1시간 운영 — 7종 trail-stop 발동</h3>
+<p>옵션 Y 봇이 1시간 가동되는 동안 다음과 같이 동작:</p>
+<table>
+<tr><th>종목</th><th>peak</th><th>청산가</th><th>변동률</th><th>비고</th></tr>
+<tr><td class="label">DOTUSDT</td><td>1.26</td><td>1.23</td><td>-2.4%</td><td>peak 대비 -2% 직후</td></tr>
+<tr><td class="label">NEARUSDT</td><td>2.08</td><td>2.03</td><td>-2.4%</td><td>"</td></tr>
+<tr><td class="label">SOLUSDT</td><td>85.17</td><td>82.39</td><td>-3.3%</td><td>"</td></tr>
+<tr><td class="label">AVAXUSDT</td><td>9.21</td><td>8.98</td><td>-2.5%</td><td>"</td></tr>
+<tr><td class="label">OPUSDT</td><td>0.13</td><td>0.12</td><td>-7.7%</td><td>큰 5m bar spike</td></tr>
+<tr><td class="label">SUIUSDT</td><td>1.03</td><td>1.01</td><td>-1.9%</td><td>"</td></tr>
+<tr><td class="label">ATOMUSDT</td><td>2.08</td><td>2.04</td><td>-1.9%</td><td>"</td></tr>
+</table>
+<p>차단 플래그는 정상 작동 (재진입 0회) — 그러나 시장 전체 약세 + 5m polling trail 의 정밀도가 peak -2% 닿자마자 발동 → 7종 모두 청산.</p>
+
+<h3>1-4. 옵션 Z 적용 — trail 평가도 4h 봉 마감 시점에만</h3>
+<p>옵션 Y의 5m polling trail 이 봉 안 spike 에 너무 민감하다는 추가 가설. 해결: trail 평가도 4h 봉 마감 직후만, closed bar 의 close 값 사용. 이게 backtest B (4h bar-by-bar) 와 정확히 일치하는 방식이어야 함.</p>
+
+<h3>1-5. 60일 backtest 비교 — 4가지 모드</h3>
+
+<table>
+<tr><th>모드</th><th>설명</th><th>avg ret</th><th>avg Sharpe</th><th>avg DD</th><th>avg trades</th></tr>
+<tr><td class="label"><b>B (4h bar)</b></td><td>sweep 우승, long-short</td><td class="green">+12.76%</td><td class="green">+2.73</td><td>-6.00%</td><td>19</td></tr>
+<tr><td class="label">L (live 어제)</td><td>매 5m polling + 차단 없음</td><td>+14.03%</td><td>+1.80</td><td class="red">-14.92%</td><td>124</td></tr>
+<tr><td class="label">Y (옵션 Y)</td><td>closed signal + 매 5m trail + 차단</td><td class="red">+0.14%</td><td class="red">-0.29</td><td>-4.60%</td><td>8</td></tr>
+<tr><td class="label">Z (옵션 Z)</td><td>closed signal + 4h trail + 차단</td><td class="red">+1.86%</td><td class="red">-0.07</td><td>-8.58%</td><td>8</td></tr>
+</table>
+
+<div class="callout warn">
+<b>예상 밖 결과.</b>
+옵션 Z 도 backtest B 와 일치하지 않음. trades=8회 (B의 절반 미만). 차단 플래그가 너무 강하게 작동.
+</div>
+
+<h2>2. 진짜 원인 발견 — long-short vs long-only</h2>
+
+<h3>2-1. 차이의 본질</h3>
+
+<div class="diagram">backtest B (sweep 우승자)              live 봇 (지금 운영)
+──────────────────────────────         ──────────────────────────────
+strat_trend (long-short)               --allow-short 안 줌 (long-only)
+  sig = +1 또는 -1                       sig = 0 또는 +1
+  (fast > slow → +1)                     (fast > slow → 1, else 0)
+  (fast < slow → -1)
+
+trail 발동 후 동작:                       trail 발동 후 동작:
+  state = 0                              state = 0
+  stopped_until_signal_change = 1        stopped_block = 1
+
+  다음 bar :                              다음 bar :
+    sig=+1 → 차단                          sig=1 → 차단
+    sig=-1 → 차단 해제 + SHORT 진입         sig=0 → 차단 해제 (대기)
+                                          (sig 0 자체가 거의 안 나옴!)
+
+거래 회전:                                거래 회전:
+  trail → SHORT → cross-up → LONG → ...   trail → 영원히 대기
+  (계속 거래 회전)                        (cross-down 봉 마감까지)
+</div>
+
+<h3>2-2. 영향 — 강세장에서 long-only 의 함정</h3>
+<p>4h+12/48 MA 는 강세 추세에서 fast > slow 가 며칠~수주 유지됨. long-short backtest 에서는 trail 후 SHORT 진입했다가 다시 LONG 으로 회전하며 거래 횟수 유지. long-only 에서는 sig=1 이 계속 나와서 trail 후 영원히 차단.</p>
+
+<table>
+<tr><th>종목</th><th>backtest B<br>(long-short)</th><th>backtest Z<br>(long-only)</th><th>차이</th></tr>
+<tr><td class="label">NEARUSDT</td><td class="green">+39.53%</td><td>+20.85%</td><td class="red">-18.7%p</td></tr>
+<tr><td class="label">INJUSDT</td><td class="green">+23.30%</td><td>+10.11%</td><td class="red">-13.2%p</td></tr>
+<tr><td class="label">SOLUSDT</td><td class="green">+18.23%</td><td class="red">-4.67%</td><td class="red">-22.9%p</td></tr>
+<tr><td class="label">SUIUSDT</td><td class="green">+19.27%</td><td class="red">-3.96%</td><td class="red">-23.2%p</td></tr>
+<tr><td class="label">OPUSDT</td><td class="green">+12.25%</td><td>+4.15%</td><td class="red">-8.1%p</td></tr>
+<tr><td class="label">BTCUSDT</td><td>+0.25%</td><td class="green">+4.43%</td><td class="green">+4.2%p</td></tr>
+<tr><td class="label">BNBUSDT</td><td class="green">+6.93%</td><td class="red">-1.32%</td><td class="red">-8.3%p</td></tr>
+</table>
+
+<p>BTC 만 long-only 가 더 좋음 — BTC 는 변동성이 작아서 long-only 도 휩쏘에 덜 노출. 알트는 모두 long-short 가 압도적.</p>
+
+<h3>2-3. 어제 sweep 결과를 다시 보면</h3>
+<p>어제 본 "옵션 B 우승자, 평균 Sharpe +6.29 / +6.70" 도 long-short 결과. live 봇 (long-only) 으로는 절대 그 결과가 나올 수 없음.</p>
+
+<h2>3. 운영 봇 현재 상태</h2>
+<table>
+<tr><th>시점</th><th>모드</th><th>지갑 (USDT)</th><th>변화</th></tr>
+<tr><td>어제 14:51</td><td>옵션 B (인프로그레스 signal + 매 5m + 차단 없음)</td><td>11,032</td><td>baseline</td></tr>
+<tr><td>오늘 16:00</td><td>옵션 Y 시작 (closed signal + 차단)</td><td>10,725</td><td class="red">-307</td></tr>
+<tr><td>오늘 16:50</td><td>옵션 Y 운영 1h, 7종 trail-stop</td><td>10,619</td><td class="red">-106</td></tr>
+<tr><td>오늘 17:03</td><td>옵션 Z 적용 + 재시작</td><td>10,619</td><td>(현재)</td></tr>
+<tr><td>잔여 포지션</td><td colspan="3">INJUSDT LONG, BNBUSDT LONG</td></tr>
+</table>
+
+<h2>4. 다음 행동 옵션 — 4갈래</h2>
+
+<table>
+<tr><th>옵션</th><th>변경 사항</th><th>예상 결과 (60d)</th><th>리스크</th></tr>
+<tr><td class="label">①  --allow-short 추가<br>(long-short)</td>
+    <td>live 봇에 SHORT 진입 허용 — backtest B 와 정확히 일치</td>
+    <td>Sharpe ~+2.73, 수익 +12.76% (60d 평균)</td>
+    <td>SHORT 손실 위험, mainnet 시 자본 효율 다름</td></tr>
+<tr><td class="label">② 차단 조건 완화<br>(N봉 후 자동 해제)</td>
+    <td>trail 발동 후 N개 봉 (예: 6개 = 24시간) 지나면 차단 자동 해제</td>
+    <td>L 모드와 옵션 Y 사이 — 미검증</td>
+    <td>휩쏘 부활 가능성</td></tr>
+<tr><td class="label">③ 옵션 Z 유지 + 관찰</td>
+    <td>현재 그대로 — 4h 봉 마감 시점에만 평가</td>
+    <td>backtest Z = +1.86% / -0.07 Sharpe</td>
+    <td>대기만 하다 수익 거의 없음</td></tr>
+<tr><td class="label">④ 옵션 L (어제) 복귀</td>
+    <td>차단 제거, 매 5m polling, 진행중 봉 신호 사용 — 휩쏘 감수</td>
+    <td>+14.03% / +1.80 Sharpe / -14.92% DD</td>
+    <td>DD 큼, 어제 -$300 같은 일주일 손실 반복</td></tr>
+</table>
+
+<h3>4-1. 차트 — 4가지 모드 평균 Sharpe</h3>
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace, Consolas, monospace" font-size="11">
+  <line x1="100" y1="30" x2="100" y2="260" stroke="#333"/>
+  <line x1="100" y1="260" x2="740" y2="260" stroke="#333"/>
+  <text x="420" y="18" font-size="13" font-weight="bold" text-anchor="middle">60일 backtest — 모드별 평균 Sharpe</text>
+
+  <!-- Y axis: 0 at y=260, +3 at y=110 -->
+  <text x="94" y="263" text-anchor="end">0</text>
+  <text x="94" y="210" text-anchor="end">+1</text>
+  <text x="94" y="160" text-anchor="end">+2</text>
+  <text x="94" y="110" text-anchor="end">+3</text>
+  <text x="94" y="290" text-anchor="end">-1</text>
+  <line x1="100" y1="260" x2="740" y2="260" stroke="#000" stroke-width="0.5"/>
+
+  <!-- Bar B: +2.73 → height=137 -->
+  <rect x="150" y="123" width="80" height="137" fill="#28a745"/>
+  <text x="190" y="278" text-anchor="middle" font-weight="bold">B (long-short)</text>
+  <text x="190" y="120" text-anchor="middle" font-weight="bold">+2.73</text>
+
+  <!-- Bar L: +1.80 → height=90 -->
+  <rect x="270" y="170" width="80" height="90" fill="#3273dc"/>
+  <text x="310" y="278" text-anchor="middle">L (어제 live)</text>
+  <text x="310" y="293" text-anchor="middle" fill="#666">long-only</text>
+  <text x="310" y="167" text-anchor="middle">+1.80</text>
+
+  <!-- Bar Y: -0.29 → 0 위로 살짝 -->
+  <rect x="390" y="260" width="80" height="14" fill="#dc3545"/>
+  <text x="430" y="278" text-anchor="middle">Y (옵션 Y)</text>
+  <text x="430" y="293" text-anchor="middle" fill="#666">long-only + 차단</text>
+  <text x="430" y="284" text-anchor="middle" fill="#dc3545" font-size="10">-0.29</text>
+
+  <!-- Bar Z: -0.07 -->
+  <rect x="510" y="260" width="80" height="4" fill="#dc3545"/>
+  <text x="550" y="278" text-anchor="middle">Z (옵션 Z)</text>
+  <text x="550" y="293" text-anchor="middle" fill="#666">long-only + 4h trail</text>
+  <text x="550" y="252" text-anchor="middle" fill="#dc3545" font-size="10">-0.07</text>
+
+  <!-- Annotation -->
+  <line x1="180" y1="100" x2="280" y2="80" stroke="#28a745" stroke-width="1.5"/>
+  <text x="285" y="78" fill="#28a745" font-size="11" font-weight="bold">sweep 우승자 — long-short 라서 좋음</text>
+  <line x1="430" y1="280" x2="430" y2="300" stroke="#dc3545" stroke-width="1.5" stroke-dasharray="2,2"/>
+</svg>
+
+<h2>5. 추천 — 옵션 ① (long-short 도입)</h2>
+
+<div class="callout win">
+<b>가장 backtest 일치하는 길.</b>
+<code>--allow-short</code> 한 줄 추가만으로 live 가 sweep 우승자 B 와 같은 동작. backtest 평균 Sharpe +2.73 이 그대로 적용 기대.
+</div>
+
+<div class="callout info">
+<b>SHORT 도입 시 추가 고려.</b>
+<ul>
+<li>USDT-M perpetual 은 SHORT 도 가능 (현재 메인 모드)</li>
+<li>SHORT 진입 시 funding rate 부담 발생 (LONG 과 반대 방향). 강세장에서는 LONG 이 funding 받음, SHORT 가 지불</li>
+<li>현재 코드 (<code>compute_signal</code>) 는 SHORT 지원, 다만 entry 자본 분할이 LONG 과 동일하게 처리되는지 검증 필요</li>
+<li>backtest sweep 자체가 long-short 기준 이라 long-short live 가 가장 자연스러운 매치</li>
+</ul>
+</div>
+
+<h2>6. 비전공자용 요약 (TL;DR)</h2>
+<div class="tldr">
+<ol>
+<li><b>어제 -$300 손실의 원인은 휩쏘 (같은 종목 청산-진입 반복)</b>
+<br>→ 옵션 Y (closed signal + 차단 플래그) 로 1차 수정</li>
+<li><b>옵션 Y 의 1시간 운영 결과는 정확히 의도대로 — 7종 모두 peak -2% 닿자 자동 청산</b>
+<br>→ 시장 약세 + 정밀한 trail 의 자연스러운 결과</li>
+<li><b>그런데 backtest 비교에서 옵션 Y/Z 모두 backtest B (Sharpe +2.73) 에 한참 못 미침</b>
+<br>→ 옵션 Y -0.29, 옵션 Z -0.07. 거의 0 수익.</li>
+<li><b>진짜 원인 발견 — sweep 우승자 B 는 "LONG 과 SHORT 둘 다 진입" (long-short)</b>
+<br>→ live 봇은 "LONG 만" (long-only). 강세 추세에서 trail 발동 후 SHORT 못 가니 영원히 대기.</li>
+<li><b>해결책 — live 봇에 <code>--allow-short</code> 추가하면 backtest 와 일치</b>
+<br>→ 60일 평균 Sharpe +2.73, 수익 +12.76% 기대</li>
+<li><b>지금 봇은 옵션 Z 로 가동 중 (잔여 INJ + BNB LONG 2종)</b>
+<br>→ 결정 대기: ① SHORT 허용 (추천) / ② 차단 완화 / ③ 그대로 유지 / ④ 어제 동작 복귀</li>
+</ol>
+</div>
+
+<h2>7. 관련 파일</h2>
+<ul>
+<li>운영 봇: <a href="../../scripts/run_crypto_testnet.py">scripts/run_crypto_testnet.py</a> (옵션 Y → 옵션 Z 패치)</li>
+<li>backtest: <a href="../../scripts/backtest_crypto_optY_5min.py">scripts/backtest_crypto_optY_5min.py</a> (4모드 비교)</li>
+<li>결과 데이터: <code>data/backtest_crypto_optY_60d_20260523_170511.parquet</code></li>
+<li>운영 로그 (옵션 Y 1시간): <code>data/crypto_runner_18sym_optY.log</code></li>
+<li>운영 로그 (옵션 Z 현재): <code>data/crypto_runner_18sym_optZ.log</code></li>
+<li>이전 보고서: <a href="../2026-05-22/crypto_swing_mode_AB.html">2026-05-22 swing 1차</a>,
+                <a href="../2026-05-22/crypto_swing_alts_expansion.html">2026-05-22 알트 확장</a></li>
+</ul>
+
+<h2>8. 용어 정리집</h2>
+<table>
+<tr><th>용어</th><th>한 줄 설명</th><th>본문에서의 역할</th></tr>
+<tr><td>long-only</td><td>매수 (LONG) 만 가능. fast &lt; slow 시 청산 후 대기, SHORT 진입 안 함</td><td>현재 live 봇 동작, 옵션 Y/Z 의 함정</td></tr>
+<tr><td>long-short</td><td>매수 (LONG) 와 공매도 (SHORT) 모두 가능. fast &gt; slow 시 LONG, fast &lt; slow 시 SHORT</td><td>sweep 우승자 B 의 실제 모드</td></tr>
+<tr><td>휩쏘 (whipsaw)</td><td>신호가 빠르게 왔다갔다 해 진입-손해-청산을 반복하는 현상</td><td>어제 24h 에 94 trade 발생한 이유</td></tr>
+<tr><td>옵션 Y</td><td>closed-bar 신호 + 매 5m trail + 차단 플래그</td><td>1차 휩쏘 fix, 그러나 차단 너무 강함</td></tr>
+<tr><td>옵션 Z</td><td>closed-bar 신호 + 4h trail + 차단 플래그 (= backtest B 와 일치 시도)</td><td>2차 fix, 그러나 long-only 한계로 backtest B 미달</td></tr>
+<tr><td>차단 플래그 (stopped_until_signal_change)</td><td>trail 발동 후 같은 방향 신호로는 재진입 안 함. 다른 방향 신호 나와야 해제.</td><td>휩쏘 방지의 정석, long-only 에서는 해제 안 됨</td></tr>
+<tr><td>잠정 close</td><td>봉이 닫히기 전 그 polling 순간의 현재가 (= close)</td><td>옵션 Y 이전 봇이 잘못 사용한 가격</td></tr>
+<tr><td>closed bar</td><td>이미 마감된 봉. open / high / low / close 모두 확정.</td><td>옵션 Y 가 신호 평가에 사용</td></tr>
+<tr><td>funding rate</td><td>perpetual 선물에서 LONG/SHORT 사이 지불되는 비율. 강세장에서 LONG 이 받음, SHORT 지불.</td><td>SHORT 도입 시 추가 비용 고려 필요</td></tr>
+<tr><td>USDT-M perpetual</td><td>USDT 마진 무기한 선물. SHORT 도 자유롭게 가능.</td><td>현재 운영 시장 — long-short 자연스럽게 가능</td></tr>
+</table>
+
+</body>
+</html>

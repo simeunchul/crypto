@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0e14" />
+  <title>Crypto Bot</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo">◆</span> Crypto Bot
+      <span id="env-badge" class="badge badge-testnet">TESTNET</span>
+    </div>
+    <div id="conn" class="conn conn-off">●  연결 중…</div>
+  </header>
+
+  <main>
+    <!-- STATE + CONTROLS -->
+    <section class="card control">
+      <div class="state-row">
+        <div>
+          <div class="label">봇 상태</div>
+          <div id="state" class="state state-idle">IDLE</div>
+        </div>
+        <div>
+          <div class="label">가동 시간</div>
+          <div id="uptime" class="val">—</div>
+        </div>
+        <div>
+          <div class="label">tick</div>
+          <div id="tick" class="val">—</div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <select id="preset" class="select"></select>
+        <button id="btn-start" class="btn btn-start">▶ 시작</button>
+        <button id="btn-stop" class="btn btn-stop" disabled>■ 정지</button>
+      </div>
+      <div id="preset-desc" class="preset-desc"></div>
+      <div id="msg" class="msg"></div>
+      <button id="btn-pair" class="btn pair-btn">📱 폰 앱 연결 정보</button>
+    </section>
+
+    <!-- BALANCE -->
+    <section class="cards-3">
+      <div class="card stat">
+        <div class="label">지갑 잔고</div>
+        <div id="wallet" class="big">—</div>
+        <div class="unit">USDT</div>
+      </div>
+      <div class="card stat">
+        <div class="label">미실현 손익</div>
+        <div id="upnl" class="big">—</div>
+        <div class="unit">USDT</div>
+      </div>
+      <div class="card stat">
+        <div class="label">세션 손익</div>
+        <div id="pnl" class="big">—</div>
+        <div id="pnl-pct" class="unit">—</div>
+      </div>
+    </section>
+
+    <!-- POSITIONS -->
+    <section class="card">
+      <div class="card-head">포지션 <span id="pos-count" class="muted"></span></div>
+      <div class="table-wrap">
+        <table id="positions">
+          <thead>
+            <tr><th>종목</th><th>방향</th><th class="r">비중</th><th class="r">진입가</th>
+                <th class="r">현재가</th><th class="r">고점대비</th><th>신호</th></tr>
+          </thead>
+          <tbody><tr><td colspan="7" class="muted center">데이터 없음</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- LOGS -->
+    <section class="card">
+      <div class="card-head">로그</div>
+      <div id="logs" class="logs"></div>
+    </section>
+  </main>
+
+  <div id="confirm" class="modal hidden">
+    <div class="modal-box">
+      <div id="confirm-title" class="modal-title">실거래 확인</div>
+      <div id="confirm-body" class="modal-body"></div>
+      <div class="modal-actions">
+        <button id="confirm-cancel" class="btn">취소</button>
+        <button id="confirm-ok" class="btn btn-start">시작</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pair" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-title" style="color:var(--blue)">📱 폰 앱 연결</div>
+      <div class="modal-body">
+        폰 앱 설정에 아래 정보를 입력하세요. (같은 와이파이 필요)
+        <div class="pair-field"><span class="muted">서버 주소</span><code id="pair-url">—</code></div>
+        <div class="pair-field"><span class="muted">토큰</span><code id="pair-token">—</code></div>
+      </div>
+      <div class="modal-actions">
+        <button id="pair-close" class="btn">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

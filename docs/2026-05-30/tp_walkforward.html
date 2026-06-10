@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Crypto — 익절 룰 walk-forward 검증 (AVAX 이익 반락은 막을 수 있는가)</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; max-width: 1100px; margin: 28px auto; padding: 0 18px; color: #1d1d1f; line-height: 1.55; }
+  h1 { font-size: 26px; border-bottom: 2px solid #1d1d1f; padding-bottom: 6px; }
+  h2 { font-size: 21px; margin-top: 36px; border-left: 5px solid #007aff; padding-left: 10px; }
+  h3 { font-size: 17px; margin-top: 22px; }
+  .callout { background: #fff8e6; border-left: 5px solid #ffb800; padding: 12px 16px; margin: 16px 0; border-radius: 3px; }
+  .callout.win  { background: #e6f7eb; border-left-color: #28a745; }
+  .callout.warn { background: #fde6e6; border-left-color: #dc3545; }
+  .callout.info { background: #e7f1ff; border-left-color: #007aff; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13.5px; }
+  th, td { border: 1px solid #d0d5dd; padding: 6px 8px; text-align: right; }
+  th { background: #f5f6f8; text-align: center; }
+  td:first-child, td.label { text-align: left; }
+  .green { color: #28a745; font-weight: 600; }
+  .red { color: #dc3545; font-weight: 600; }
+  .gray { color: #8a8a8a; }
+  .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 13px; }
+  pre { background: #f5f6f8; padding: 12px; overflow-x: auto; font-size: 12.5px; border-radius: 3px; }
+  .tldr { background: #eef4ff; border: 1px solid #b6cffd; padding: 14px 18px; border-radius: 4px; margin: 18px 0; }
+  .diagram { background: #fafbfc; border: 1px solid #d0d5dd; padding: 14px; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; white-space: pre; overflow-x: auto; }
+  .chart-cap { font-size: 12px; color: #666; margin-top: 4px; margin-bottom: 18px; }
+  svg { display: block; margin: 8px auto; }
+  .legend-box { display: inline-block; width: 12px; height: 12px; vertical-align: middle; margin-right: 4px; border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<h1>Crypto — 익절 룰 walk-forward 검증</h1>
+<p class="mono">생성: 2026-05-30 · 관련 데이터: <code>data/backtest_tp_sweep_365d_20260530_153557.json</code>, <code>data/backtest_tp_walkforward_365d_20260530_155806.parquet</code></p>
+
+<div class="callout warn">
+<b>한 줄 결과.</b>
+사용자 질문 — "AVAX SHORT 가 미실현 +$315 까지 갔다가 +$238 로 $77 반납했다. 익절 룰을 넣으면 막을 수 있는가". <br>
+검증한 답: <b>평균적으론 약간 좋아지지만 (Sharpe +0.27, 단순 채택 권장 못 함)</b>. 365일 in-sample 스윕에선 단계적 trail 압축(<b>tiered+3%</b>) 이 baseline 대비 Sharpe +0.21 우세였으나, 30일 비중첩 윈도우 198개로 walk-forward 검증 결과 <b>강한 추세장(STRONG_TREND) 91개 윈도우에선 승률 42.9% — 평균을 깎는 구간</b>. 약한 추세·횡보에선 승률 60% 대로 강함. 즉 <b>regime-dependent rule</b> — 시장 국면 감지 없이 일괄 적용하면 강추세장에 손해. 권장: 즉시 채택 X, <b>4종(SUI, LINK, NEAR, ADA)은 baseline 유지 + 나머지 14종만 tiered+3% 적용</b>의 부분 채택 또는 regime detector 도입 후 동적 적용.
+</div>
+
+<h2>0. 이 보고서의 위치 — 지금까지 의사결정 흐름</h2>
+
+<p>봇은 한 번에 만들어진 게 아니라 지난 1주일간 backtest 결과를 보고 단계별로 좁혀온 결과물이다. 본 보고서는 그 마지막 미세조정 단계의 검증이다. 이전 결정들을 모르면 "왜 baseline 이 baseline 인가"가 안 보이므로 요약한다.</p>
+
+<svg viewBox="0 0 1040 230" width="100%" preserveAspectRatio="xMidYMid meet" style="background:#fff">
+  <text x="20" y="22" font-size="13" font-weight="600">의사결정 타임라인 — 1주일간 backtest 흐름</text>
+
+  <!-- horizontal axis -->
+  <line x1="50" y1="120" x2="990" y2="120" stroke="#888" stroke-width="2"/>
+
+  <!-- node 1 : 5/22 swing_mode_AB -->
+  <circle cx="120" cy="120" r="6" fill="#007aff"/>
+  <text x="120" y="100" font-size="11" text-anchor="middle" font-weight="600">5/22</text>
+  <text x="120" y="88" font-size="10" text-anchor="middle" fill="#666">옵션 A→B</text>
+  <text x="120" y="140" font-size="10" text-anchor="middle">1h →</text>
+  <text x="120" y="154" font-size="10" text-anchor="middle">4h 12/48</text>
+  <text x="120" y="168" font-size="10" text-anchor="middle" fill="#28a745">+6.29 Sharpe</text>
+
+  <!-- node 2 : 5/22 alts -->
+  <circle cx="280" cy="120" r="6" fill="#007aff"/>
+  <text x="280" y="100" font-size="11" text-anchor="middle" font-weight="600">5/22</text>
+  <text x="280" y="88" font-size="10" text-anchor="middle" fill="#666">알트 확장</text>
+  <text x="280" y="140" font-size="10" text-anchor="middle">5종 →</text>
+  <text x="280" y="154" font-size="10" text-anchor="middle">18종</text>
+  <text x="280" y="168" font-size="10" text-anchor="middle" fill="#28a745">+6.70 Sharpe</text>
+
+  <!-- node 3 : 5/23 optY/Z -->
+  <circle cx="440" cy="120" r="6" fill="#dc3545"/>
+  <text x="440" y="100" font-size="11" text-anchor="middle" font-weight="600">5/23</text>
+  <text x="440" y="88" font-size="10" text-anchor="middle" fill="#666">opt Y/Z</text>
+  <text x="440" y="140" font-size="10" text-anchor="middle">live -$300</text>
+  <text x="440" y="154" font-size="10" text-anchor="middle">→ long-short</text>
+  <text x="440" y="168" font-size="10" text-anchor="middle" fill="#28a745">격차 해소</text>
+
+  <!-- node 4 : 5/28 swing wf -->
+  <circle cx="600" cy="120" r="6" fill="#007aff"/>
+  <text x="600" y="100" font-size="11" text-anchor="middle" font-weight="600">5/28</text>
+  <text x="600" y="88" font-size="10" text-anchor="middle" fill="#666">walk-forward</text>
+  <text x="600" y="140" font-size="10" text-anchor="middle">11 윈도우</text>
+  <text x="600" y="154" font-size="10" text-anchor="middle">전부 +</text>
+  <text x="600" y="168" font-size="10" text-anchor="middle" fill="#28a745">승률 90%</text>
+
+  <!-- node 5 : 5/28 trend vs MR -->
+  <circle cx="760" cy="120" r="6" fill="#007aff"/>
+  <text x="760" y="100" font-size="11" text-anchor="middle" font-weight="600">5/28</text>
+  <text x="760" y="88" font-size="10" text-anchor="middle" fill="#666">trend vs MR</text>
+  <text x="760" y="140" font-size="10" text-anchor="middle">MR 추가</text>
+  <text x="760" y="154" font-size="10" text-anchor="middle">기각</text>
+  <text x="760" y="168" font-size="10" text-anchor="middle" fill="#dc3545">현 구성 최선</text>
+
+  <!-- node 6 : 5/30 본 보고서 -->
+  <circle cx="920" cy="120" r="8" fill="#ffb800" stroke="#1d1d1f" stroke-width="2"/>
+  <text x="920" y="100" font-size="11" text-anchor="middle" font-weight="600">5/30 (오늘)</text>
+  <text x="920" y="88" font-size="10" text-anchor="middle" fill="#666">TP 룰 검증</text>
+  <text x="920" y="140" font-size="10" text-anchor="middle">tiered+3%</text>
+  <text x="920" y="154" font-size="10" text-anchor="middle">부분 채택</text>
+  <text x="920" y="168" font-size="10" text-anchor="middle" fill="#ffb800">14/18 종목</text>
+
+  <!-- annotations top -->
+  <text x="520" y="200" font-size="11" text-anchor="middle" fill="#666">"신호 → 종목 → 양방향 → 시간 robust → MR 불필요 → 청산 룰 미세조정" 으로 좁혀옴</text>
+</svg>
+<p class="chart-cap">파란 점 = 결정 / 추가, 빨간 점 = 문제 해결, 노란 점 = 현재 검증. 각 단계 sharpe 는 측정 기간·종목셋 다르므로 직접 비교 불가 (맥락만).</p>
+
+<h3>각 단계 한 줄 요약 + 이번 검증과의 관계</h3>
+
+<table>
+<tr><th>날짜</th><th style="text-align:left">단계 / 결정</th><th style="text-align:left">결과</th><th style="text-align:left">본 검증과 관계</th></tr>
+
+<tr>
+  <td class="label">2026-05-22</td>
+  <td class="label">swing 모드 도입 + 옵션 A → B (1h → 4h, 6/24 → 12/48)</td>
+  <td class="label">5종 평균 Sharpe <b>+4.85 → +6.29</b></td>
+  <td class="label">본 보고서 baseline_trail2 의 4h·12/48 이 여기서 정해짐.</td>
+</tr>
+<tr>
+  <td class="label">2026-05-22</td>
+  <td class="label">알트 14종 확장 → 19종 sweep, TRX/MATIC 제외</td>
+  <td class="label">평균 Sharpe <b>+6.70</b> (18종), 단일 룰로 종목 일괄 운영 가능</td>
+  <td class="label">본 보고서가 동일한 18종 universe 사용.</td>
+</tr>
+<tr>
+  <td class="label">2026-05-23</td>
+  <td class="label">옵션 Y (closed-bar 신호) + 옵션 Z (trail 도 봉 마감만)</td>
+  <td class="label">long-only 에서 큰 격차 발견 → <code>--allow-short</code> 추가로 backtest 와 동조</td>
+  <td class="label">옵션 Z = 본 보고서가 비교하는 baseline 의 핵심 정의. AVAX intraday $8.65 가 trigger 못 한 이유.</td>
+</tr>
+<tr>
+  <td class="label">2026-05-28</td>
+  <td class="label">long-short walk-forward — 11 윈도우 × 10종 = 110 표본</td>
+  <td class="label"><b>11 윈도우 전부 + 수익</b>, 승률 90%, 횡보 구간 평균 +9.55%</td>
+  <td class="label">본 보고서가 같은 walk-forward 패턴 (30일 비중첩) 으로 룰 비교에 확장.</td>
+</tr>
+<tr>
+  <td class="label">2026-05-28</td>
+  <td class="label">횡보용 MR (Bollinger mean-reversion) 추가 검토</td>
+  <td class="label">모든 변동성 국면에서 <b>TREND &gt; MR</b>, MR 승률 48% → 기각</td>
+  <td class="label">"국면별 다른 룰" 의 직전 시도. 본 보고서의 옵션 C (regime detector) 가 같은 논리 — 단 거기서는 청산 룰만 바꾸는 더 좁은 적용.</td>
+</tr>
+<tr>
+  <td class="label"><b>2026-05-30 (오늘)</b></td>
+  <td class="label"><b>청산 룰 미세조정 — TP / tiered trail 도입 검토</b></td>
+  <td class="label">tiered+3% 평균 ΔSharpe <b>+0.27</b>, 단 STRONG_TREND 약함. <b>14/18 종목 부분 채택</b> 권장</td>
+  <td class="label">진입 신호·종목·옵션 Z 가 다 고정된 상태에서 마지막 청산 룰 한 곳만 손보는 단계.</td>
+</tr>
+</table>
+
+<div class="callout info">
+<b>흐름의 핵심.</b> 매 단계가 직전 결정을 뒤집은 게 아니라 그 위에 한 칸씩 쌓은 구조. baseline_trail2 (Sharpe 4.10) 는 위 결정들의 누적 결과지 임의의 시작점이 아니다. <b>본 검증은 그 baseline 을 깨려는 시도였고, 평균은 깰 수 있지만 모든 시장 국면에서 깰 수는 없다는 결론</b>.
+</div>
+
+<h2>1. 왜 이 검증을 했는가</h2>
+
+<p>실제 운영봇이 AVAX 를 SHORT (entry $9.8175) 로 보유 중인 상황. 시세가 intraday $8.65 까지 내려가 미실현이익이 +$315 가까이 갔다가, 다시 $8.93 으로 반등하며 +$238 (약 $77 반납) 으로 줄어들었다. 사용자가 "<b>지금처럼 trail-stop 만 쓰면 이런 반납을 못 막는다. 익절 기준을 명확히 잡고, 필요시 재진입 하는 게 낫지 않냐</b>" 라고 질문.</p>
+
+<div class="callout info">
+<b>현행 trail-stop (옵션 Z)</b> — 4h 봉 마감 close 가 high_water (LONG) / low_water (SHORT) 대비 2% 반대로 가면 청산. AVAX 의 경우 low_water $8.813, trigger $8.989. 현재 mark $8.926 은 trigger 까지 +0.71% 남음. backtest sweep 우승 구성 (Sharpe +2.76 검증).
+</div>
+
+<h2>2. 후보 4종 — 무엇을 비교했는가</h2>
+
+<table>
+<tr><th>이름</th><th style="text-align:left">동작</th><th style="text-align:left">기대 효과 / 위험</th></tr>
+<tr><td class="label">baseline_trail2</td><td class="label">trail 2%, 변경 없음 (현행 운영봇)</td><td class="label">기준선</td></tr>
+<tr><td class="label">tiered_at+N%</td><td class="label">진입 후 +N% 이익 도달 시 trail 폭을 2% → 1% 로 압축</td><td class="label">큰 이익 일부 보호. winners run 은 일부 유지</td></tr>
+<tr><td class="label">partial50_at+N%</td><td class="label">+N% 이익 시 포지션 절반 청산, 나머지는 trail 2% 유지</td><td class="label">분산↓, 재진입 차단 영향 작음. 단 트레이드 비용↑</td></tr>
+<tr><td class="label">hard_tp_at+N%</td><td class="label">+N% 이익 도달 시 전량 청산</td><td class="label">가장 보수적. winners run 완전 끊김 위험</td></tr>
+</table>
+
+<p class="chart-cap">파라미터 N (이익 임계): 3·5·8·10·15% × 룰별로 sweep. 총 14 룰 (baseline 1 + tiered 5 + partial 4 + hard 4).</p>
+
+<h2>3. 1단계 — 365일 in-sample 스윕 (18종, 4h, MA 12/48)</h2>
+
+<p>운영봇과 동일 구성 (long-short, 4h, MA 12/48, 거래비용 4bps/side) 으로 14 룰 × 18종 모두 실행 후 종목 평균 metric 비교.</p>
+
+<table>
+<tr><th>룰</th><th>평균 Sharpe</th><th>Δ vs baseline</th><th>평균 Return%</th><th>평균 MaxDD%</th></tr>
+<tr><td class="label"><b>tiered_at+3%</b></td><td class="green"><b>4.308</b></td><td class="green"><b>+0.210</b></td><td>193.1</td><td>-8.96</td></tr>
+<tr><td class="label">tiered_at+5%</td><td>4.186</td><td class="green">+0.088</td><td>195.4</td><td>-9.08</td></tr>
+<tr><td class="label">tiered_at+10%</td><td>4.141</td><td class="green">+0.043</td><td>201.2</td><td>-9.09</td></tr>
+<tr><td class="label">tiered_at+8%</td><td>4.135</td><td class="green">+0.037</td><td>198.2</td><td>-9.08</td></tr>
+<tr><td class="label">tiered_at+15%</td><td>4.105</td><td class="green">+0.007</td><td>199.9</td><td>-9.19</td></tr>
+<tr><td class="label"><b>baseline_trail2 (현행)</b></td><td><b>4.098</b></td><td>0</td><td>199.4</td><td>-9.19</td></tr>
+<tr><td class="label">partial50_at+15%</td><td>4.070</td><td class="red">-0.028</td><td>191.6</td><td>-9.19</td></tr>
+<tr><td class="label">hard_tp_at+15%</td><td>4.004</td><td class="red">-0.094</td><td>184.3</td><td>-9.19</td></tr>
+<tr><td class="label">partial50_at+10%</td><td>3.973</td><td class="red">-0.124</td><td>175.1</td><td>-9.12</td></tr>
+<tr><td class="label">partial50_at+8%</td><td>3.865</td><td class="red">-0.233</td><td>157.7</td><td>-9.11</td></tr>
+<tr><td class="label">hard_tp_at+10%</td><td>3.726</td><td class="red">-0.372</td><td>153.0</td><td>-9.09</td></tr>
+<tr><td class="label">partial50_at+5%</td><td>3.594</td><td class="red">-0.504</td><td>125.4</td><td>-9.13</td></tr>
+<tr><td class="label">hard_tp_at+8%</td><td>3.393</td><td class="red">-0.705</td><td>122.3</td><td>-9.12</td></tr>
+<tr><td class="label">hard_tp_at+5%</td><td>2.526</td><td class="red">-1.572</td><td>69.3</td><td>-9.59</td></tr>
+</table>
+
+<div class="callout info">
+<b>핵심 관찰.</b> tiered (단계적 trail 압축) 5종은 전부 baseline 보다 ≥ 0. partial50 / hard_tp 는 전부 baseline 보다 나쁨 — winners run 을 끊는 비용이 평균적으로 더 크다. <b>가장 좋은 후보는 tiered_at+3% (Sharpe 4.10 → 4.31, +0.21)</b>.
+</div>
+
+<p>AVAX 만 떼어 봐도 동일 구성: baseline Sharpe <b>3.56</b> → tiered+3% <b>4.32 (+0.76)</b>. 사용자의 우려가 backtest 로 확인됨.</p>
+
+<h2>4. 그러나 in-sample 만으로 채택하면 위험</h2>
+
+<div class="callout warn">
+<b>오버피팅 (overfitting)</b> 위험. 365일 전체로 가장 잘 맞는 룰을 골랐기에, 그 룰이 365일 안의 특정 시장 국면 (예: 횡보가 많았던 시기) 에만 강할 수 있다. <b>30일 비중첩 윈도우 11개로 분해하여 (윈도우 × 18종 = 198 표본) 시간 / 국면별 robustness 를 본다</b>.
+</div>
+
+<h2>5. 2단계 — Walk-Forward 검증 (n=198 윈도우)</h2>
+
+<table>
+<tr><th>지표</th><th>값</th><th style="text-align:left">의미</th></tr>
+<tr><td class="label">tiered+3% 승률</td><td>52.5%</td><td class="label">동전던지기(50%) 보다 약간만 위</td></tr>
+<tr><td class="label">평균 Δ Sharpe</td><td class="green">+0.272</td><td class="label">in-sample (+0.21) 과 일관 — 평균은 살아있음</td></tr>
+<tr><td class="label">중앙 Δ Sharpe</td><td>+0.092</td><td class="label">평균이 중앙보다 큼 = 분포가 비대칭 (소수 큰 승리 + 다수 작은 차이)</td></tr>
+<tr><td class="label">평균 Δ return</td><td>-0.09%p</td><td class="label">수익 자체는 사실상 동일 — sharpe 개선은 변동성 감소로 옴</td></tr>
+</table>
+
+<h3>윈도우 시간순 — 오버피팅 검출</h3>
+
+<svg viewBox="0 0 1040 280" width="100%" preserveAspectRatio="xMidYMid meet" style="background:#fff">
+  <text x="20" y="22" font-size="13" font-weight="600">윈도우별 평균 ΔSharpe (tiered+3% − baseline). 양수 = tiered 우세</text>
+
+  <!-- Y axis lines -->
+  <line x1="80" y1="60" x2="80" y2="240" stroke="#888" stroke-width="1"/>
+  <line x1="80" y1="150" x2="1010" y2="150" stroke="#888" stroke-width="1" stroke-dasharray="3,3"/>
+  <text x="74" y="153" font-size="11" text-anchor="end" fill="#666">0 (동등)</text>
+  <text x="74" y="73" font-size="11" text-anchor="end" fill="#666">+0.9</text>
+  <text x="74" y="113" font-size="11" text-anchor="end" fill="#666">+0.45</text>
+  <text x="74" y="193" font-size="11" text-anchor="end" fill="#666">-0.45</text>
+
+  <!-- Bars: window 0..10 -->
+  <!-- W0 +0.521 STRONG_TREND red, W1 -0.199 STRONG red, W2 +0.016 RANGE green,
+       W3 +0.146 WEAK orange, W4 +0.112 STRONG red, W5 +0.018 STRONG red,
+       W6 +0.711 STRONG red, W7 +0.564 RANGE green, W8 +0.173 STRONG red,
+       W9 +0.566 WEAK orange, W10 +0.370 RANGE green -->
+  <!-- scale: pixel/Δ = 90/0.45 = 200 px per 1.0 -->
+  <!-- Bar positions: x = 100 + i * 82 (width 60) -->
+
+  <g>
+    <!-- W0 +0.521 -->
+    <rect x="100" y="46.6" width="60" height="103.4" fill="#dc3545" opacity="0.85"/>
+    <text x="130" y="42" font-size="10" text-anchor="middle">+0.52</text>
+    <text x="130" y="258" font-size="10" text-anchor="middle">W0</text>
+    <text x="130" y="272" font-size="9" text-anchor="middle" fill="#666">5/30</text>
+
+    <!-- W1 -0.199 -->
+    <rect x="182" y="150" width="60" height="39.8" fill="#dc3545" opacity="0.85"/>
+    <text x="212" y="201" font-size="10" text-anchor="middle">-0.20</text>
+    <text x="212" y="258" font-size="10" text-anchor="middle">W1</text>
+    <text x="212" y="272" font-size="9" text-anchor="middle" fill="#666">6/29</text>
+
+    <!-- W2 +0.016 -->
+    <rect x="264" y="146.8" width="60" height="3.2" fill="#28a745" opacity="0.85"/>
+    <text x="294" y="142" font-size="10" text-anchor="middle">+0.02</text>
+    <text x="294" y="258" font-size="10" text-anchor="middle">W2</text>
+    <text x="294" y="272" font-size="9" text-anchor="middle" fill="#666">7/29</text>
+
+    <!-- W3 +0.146 -->
+    <rect x="346" y="120.8" width="60" height="29.2" fill="#ffb800" opacity="0.85"/>
+    <text x="376" y="116" font-size="10" text-anchor="middle">+0.15</text>
+    <text x="376" y="258" font-size="10" text-anchor="middle">W3</text>
+    <text x="376" y="272" font-size="9" text-anchor="middle" fill="#666">8/28</text>
+
+    <!-- W4 +0.112 -->
+    <rect x="428" y="127.6" width="60" height="22.4" fill="#dc3545" opacity="0.85"/>
+    <text x="458" y="122" font-size="10" text-anchor="middle">+0.11</text>
+    <text x="458" y="258" font-size="10" text-anchor="middle">W4</text>
+    <text x="458" y="272" font-size="9" text-anchor="middle" fill="#666">9/27</text>
+
+    <!-- W5 +0.018 -->
+    <rect x="510" y="146.4" width="60" height="3.6" fill="#dc3545" opacity="0.85"/>
+    <text x="540" y="141" font-size="10" text-anchor="middle">+0.02</text>
+    <text x="540" y="258" font-size="10" text-anchor="middle">W5</text>
+    <text x="540" y="272" font-size="9" text-anchor="middle" fill="#666">10/27</text>
+
+    <!-- W6 +0.711 -->
+    <rect x="592" y="7.8" width="60" height="142.2" fill="#dc3545" opacity="0.85"/>
+    <text x="622" y="-2" font-size="10" text-anchor="middle"></text>
+    <text x="622" y="3" font-size="10" text-anchor="middle">+0.71</text>
+    <text x="622" y="258" font-size="10" text-anchor="middle">W6</text>
+    <text x="622" y="272" font-size="9" text-anchor="middle" fill="#666">11/26</text>
+
+    <!-- W7 +0.564 -->
+    <rect x="674" y="37.2" width="60" height="112.8" fill="#28a745" opacity="0.85"/>
+    <text x="704" y="33" font-size="10" text-anchor="middle">+0.56</text>
+    <text x="704" y="258" font-size="10" text-anchor="middle">W7</text>
+    <text x="704" y="272" font-size="9" text-anchor="middle" fill="#666">12/26</text>
+
+    <!-- W8 +0.173 -->
+    <rect x="756" y="115.4" width="60" height="34.6" fill="#dc3545" opacity="0.85"/>
+    <text x="786" y="110" font-size="10" text-anchor="middle">+0.17</text>
+    <text x="786" y="258" font-size="10" text-anchor="middle">W8</text>
+    <text x="786" y="272" font-size="9" text-anchor="middle" fill="#666">1/25</text>
+
+    <!-- W9 +0.566 -->
+    <rect x="838" y="36.8" width="60" height="113.2" fill="#ffb800" opacity="0.85"/>
+    <text x="868" y="32" font-size="10" text-anchor="middle">+0.57</text>
+    <text x="868" y="258" font-size="10" text-anchor="middle">W9</text>
+    <text x="868" y="272" font-size="9" text-anchor="middle" fill="#666">2/24</text>
+
+    <!-- W10 +0.370 -->
+    <rect x="920" y="76" width="60" height="74" fill="#28a745" opacity="0.85"/>
+    <text x="950" y="71" font-size="10" text-anchor="middle">+0.37</text>
+    <text x="950" y="258" font-size="10" text-anchor="middle">W10</text>
+    <text x="950" y="272" font-size="9" text-anchor="middle" fill="#666">3/26</text>
+  </g>
+
+  <!-- legend -->
+  <g transform="translate(80,245)">
+    <rect x="0" y="0" width="11" height="11" fill="#dc3545" opacity="0.85"/>
+    <text x="16" y="9" font-size="10">STRONG_TREND</text>
+    <rect x="120" y="0" width="11" height="11" fill="#ffb800" opacity="0.85"/>
+    <text x="136" y="9" font-size="10">WEAK_TREND</text>
+    <rect x="232" y="0" width="11" height="11" fill="#28a745" opacity="0.85"/>
+    <text x="248" y="9" font-size="10">RANGE</text>
+  </g>
+</svg>
+<p class="chart-cap">2025-05 ~ 2026-04 의 11개 30일 윈도우. 한 윈도우만 마이너스(W1, -0.20). 시간 흐름으로 명확한 우상향/우하향 패턴 없음 → <b>오버핏의 강한 신호는 아님</b>. 단 STRONG_TREND (빨강) 윈도우 8개 중 3개는 △ ≤ +0.02 — 강추세장에서 우세가 미미.</p>
+
+<h3>시장 국면별 — regime dependence 발견</h3>
+
+<table>
+<tr><th>국면</th><th>윈도우 n</th><th>tier 승률</th><th>평균 ΔSharpe</th><th>평균 ΔReturn</th><th>평균 ΔDD</th><th style="text-align:left">해석</th></tr>
+<tr>
+  <td class="label">STRONG_TREND (|bnh| ≥ 15%)</td>
+  <td>91</td>
+  <td class="red"><b>42.9%</b></td>
+  <td>+0.076</td>
+  <td class="red">-0.58%p</td>
+  <td>+0.23%p</td>
+  <td class="label red"><b>약점</b> — 강추세에선 baseline 이 더 자주 이김</td>
+</tr>
+<tr>
+  <td class="label">WEAK_TREND (6% ≤ |bnh| &lt; 15%)</td>
+  <td>48</td>
+  <td class="green">60.4%</td>
+  <td class="green">+0.407</td>
+  <td class="green">+0.56%p</td>
+  <td>+0.22%p</td>
+  <td class="label green">우세</td>
+</tr>
+<tr>
+  <td class="label">RANGE (|bnh| &lt; 6%)</td>
+  <td>59</td>
+  <td class="green">61.0%</td>
+  <td class="green">+0.467</td>
+  <td class="green">+0.15%p</td>
+  <td>+0.41%p</td>
+  <td class="label green">가장 강함</td>
+</tr>
+</table>
+
+<svg viewBox="0 0 1040 240" width="100%" preserveAspectRatio="xMidYMid meet" style="background:#fff">
+  <text x="20" y="22" font-size="13" font-weight="600">국면별 tiered+3% 승률 (50% = 동등). 빨강 = baseline 보다 못함</text>
+
+  <!-- 50% baseline line -->
+  <line x1="120" y1="160" x2="1010" y2="160" stroke="#888" stroke-width="1" stroke-dasharray="3,3"/>
+  <text x="114" y="164" font-size="11" text-anchor="end" fill="#666">50% (동등)</text>
+  <text x="114" y="90" font-size="11" text-anchor="end" fill="#666">75%</text>
+  <text x="114" y="50" font-size="11" text-anchor="end" fill="#666">100%</text>
+
+  <!-- STRONG_TREND 42.9% (below baseline) -->
+  <rect x="200" y="160" width="200" height="56.8" fill="#dc3545" opacity="0.85"/>
+  <text x="300" y="226" font-size="11" text-anchor="middle">STRONG_TREND</text>
+  <text x="300" y="155" font-size="13" text-anchor="middle" font-weight="600">42.9%</text>
+  <text x="300" y="214" font-size="10" text-anchor="middle" fill="#fff">n=91</text>
+
+  <!-- WEAK_TREND 60.4% -->
+  <rect x="450" y="76.8" width="200" height="83.2" fill="#28a745" opacity="0.85"/>
+  <text x="550" y="226" font-size="11" text-anchor="middle">WEAK_TREND</text>
+  <text x="550" y="72" font-size="13" text-anchor="middle" font-weight="600">60.4%</text>
+  <text x="550" y="155" font-size="10" text-anchor="middle" fill="#fff">n=48</text>
+
+  <!-- RANGE 61.0% -->
+  <rect x="700" y="74" width="200" height="86" fill="#28a745" opacity="0.85"/>
+  <text x="800" y="226" font-size="11" text-anchor="middle">RANGE</text>
+  <text x="800" y="69" font-size="13" text-anchor="middle" font-weight="600">61.0%</text>
+  <text x="800" y="155" font-size="10" text-anchor="middle" fill="#fff">n=59</text>
+</svg>
+<p class="chart-cap"><b>핵심 단서.</b> tiered+3% 는 횡보·약한 추세에선 강하고 강한 추세에선 약함. 단순 채택 시 BTC 가 100일 연속 +30% 같은 강추세 구간에 손해.</p>
+
+<h3>왜 그런가 — 직관</h3>
+
+<div class="diagram">
+강한 추세장:
+  진입 → +3% 빠르게 도달 → trail 1% 로 압축
+  → 정상적 단기 retracement (-1.5%) 도 trigger → 청산
+  → 같은 방향 신호로 차단 → 큰 추세의 후반 30~50% 놓침
+  결과: baseline 대비 손해
+
+횡보·약한 추세장:
+  진입 → +3% 도달 → trail 1% 압축
+  → 작은 반전에 빨리 청산 → +2%~+3% 안전 확보
+  → 큰 추세 없으므로 후행 손실 없음
+  결과: baseline 대비 우세
+</div>
+
+<h3>종목별 — 일관성 검사</h3>
+
+<svg viewBox="0 0 1040 380" width="100%" preserveAspectRatio="xMidYMid meet" style="background:#fff">
+  <text x="20" y="22" font-size="13" font-weight="600">종목별 평균 ΔSharpe (tiered+3% − baseline, 11 윈도우 평균)</text>
+  <line x1="180" y1="40" x2="180" y2="370" stroke="#888" stroke-width="1"/>
+  <line x1="180" y1="40" x2="180" y2="370" stroke="#888" stroke-width="1"/>
+
+  <!-- 0 line vertical at x = 500. Bars extend right (green) or left (red).
+       scale: 0.1 sharpe = 60 px. Range -0.214 ~ +0.757. -->
+  <!-- 0 axis vertical -->
+  <line x1="500" y1="40" x2="500" y2="370" stroke="#888" stroke-width="1" stroke-dasharray="3,3"/>
+  <text x="500" y="34" font-size="11" text-anchor="middle" fill="#666">0</text>
+
+  <!-- 각 종목 17 픽셀 간격 -->
+  <!-- AVAX +0.757 (455 px right) -->
+  <text x="174" y="58" font-size="11" text-anchor="end">AVAX</text>
+  <rect x="500" y="48" width="454" height="14" fill="#28a745"/>
+  <text x="958" y="60" font-size="10">+0.76</text>
+
+  <text x="174" y="76" font-size="11" text-anchor="end">BNB</text>
+  <rect x="500" y="66" width="439" height="14" fill="#28a745"/>
+  <text x="943" y="78" font-size="10">+0.73</text>
+
+  <text x="174" y="94" font-size="11" text-anchor="end">LTC</text>
+  <rect x="500" y="84" width="370" height="14" fill="#28a745"/>
+  <text x="874" y="96" font-size="10">+0.62</text>
+
+  <text x="174" y="112" font-size="11" text-anchor="end">XRP</text>
+  <rect x="500" y="102" width="320" height="14" fill="#28a745"/>
+  <text x="824" y="114" font-size="10">+0.53</text>
+
+  <text x="174" y="130" font-size="11" text-anchor="end">BTC</text>
+  <rect x="500" y="120" width="289" height="14" fill="#28a745"/>
+  <text x="793" y="132" font-size="10">+0.48</text>
+
+  <text x="174" y="148" font-size="11" text-anchor="end">DOT</text>
+  <rect x="500" y="138" width="226" height="14" fill="#28a745"/>
+  <text x="730" y="150" font-size="10">+0.38</text>
+
+  <text x="174" y="166" font-size="11" text-anchor="end">ARB</text>
+  <rect x="500" y="156" width="212" height="14" fill="#28a745"/>
+  <text x="716" y="168" font-size="10">+0.35</text>
+
+  <text x="174" y="184" font-size="11" text-anchor="end">OP</text>
+  <rect x="500" y="174" width="202" height="14" fill="#28a745"/>
+  <text x="706" y="186" font-size="10">+0.34</text>
+
+  <text x="174" y="202" font-size="11" text-anchor="end">DOGE</text>
+  <rect x="500" y="192" width="173" height="14" fill="#28a745"/>
+  <text x="677" y="204" font-size="10">+0.29</text>
+
+  <text x="174" y="220" font-size="11" text-anchor="end">ATOM</text>
+  <rect x="500" y="210" width="162" height="14" fill="#28a745"/>
+  <text x="666" y="222" font-size="10">+0.27</text>
+
+  <text x="174" y="238" font-size="11" text-anchor="end">BCH</text>
+  <rect x="500" y="228" width="134" height="14" fill="#28a745"/>
+  <text x="638" y="240" font-size="10">+0.22</text>
+
+  <text x="174" y="256" font-size="11" text-anchor="end">INJ</text>
+  <rect x="500" y="246" width="128" height="14" fill="#28a745"/>
+  <text x="632" y="258" font-size="10">+0.21</text>
+
+  <text x="174" y="274" font-size="11" text-anchor="end">SOL</text>
+  <rect x="500" y="264" width="79" height="14" fill="#28a745" opacity="0.55"/>
+  <text x="583" y="276" font-size="10">+0.13</text>
+
+  <text x="174" y="292" font-size="11" text-anchor="end">ETH</text>
+  <rect x="500" y="282" width="71" height="14" fill="#28a745" opacity="0.55"/>
+  <text x="575" y="294" font-size="10">+0.12</text>
+
+  <!-- 음수 (왼쪽) -->
+  <text x="174" y="310" font-size="11" text-anchor="end">ADA</text>
+  <rect x="494" y="300" width="6" height="14" fill="#dc3545"/>
+  <text x="488" y="312" font-size="10" text-anchor="end">-0.01</text>
+
+  <text x="174" y="328" font-size="11" text-anchor="end">SUI</text>
+  <rect x="424" y="318" width="76" height="14" fill="#dc3545"/>
+  <text x="418" y="330" font-size="10" text-anchor="end">-0.13</text>
+
+  <text x="174" y="346" font-size="11" text-anchor="end">NEAR</text>
+  <rect x="394" y="336" width="106" height="14" fill="#dc3545"/>
+  <text x="388" y="348" font-size="10" text-anchor="end">-0.18</text>
+
+  <text x="174" y="364" font-size="11" text-anchor="end">LINK</text>
+  <rect x="372" y="354" width="128" height="14" fill="#dc3545"/>
+  <text x="366" y="366" font-size="10" text-anchor="end">-0.21</text>
+</svg>
+<p class="chart-cap"><b>18종 중 14종이 우세, 4종(ADA, SUI, NEAR, LINK)은 손해.</b> AVAX 가 가장 큰 수혜자 (사용자 질문의 원본). LINK·NEAR 는 강추세 비중 높았던 종목.</p>
+
+<h2>6. 결론 — 무엇을 어떻게 할 것인가</h2>
+
+<div class="callout warn">
+<b>즉시 채택은 권장하지 않음.</b> 평균 (+0.27 Sharpe) 은 살아있지만 — 승률 52.5% 로 동전던지기에 가깝고, STRONG_TREND 91 윈도우에선 승률 42.9% (baseline 이 더 자주 이김). 운영봇에 일괄 적용 시 다음 강한 추세장에 손해.
+</div>
+
+<h3>옵션 A — 그대로 baseline 유지 (가장 안전)</h3>
+<p>현행 trail-only (Sharpe +2.76 검증) 가 가장 robust 한 단일 룰. AVAX 의 $77 반납 같은 비용은 winners run 의 정상 가격으로 받아들이고, 큰 추세 후반을 잡는 이익을 우선시.</p>
+
+<h3>옵션 B — 부분 채택 (실용적)</h3>
+<p>walk-forward 에서 winner 14종에만 tiered+3% 적용. <b>baseline 유지: ADA, SUI, NEAR, LINK</b>. 운영봇 사이드에서 종목별 trail 룰 분기 필요 (configurable per-symbol trail).</p>
+
+<table>
+<tr><th>종목군</th><th>적용 룰</th><th>평균 ΔSharpe</th></tr>
+<tr><td class="label">AVAX, BNB, LTC, XRP, BTC, DOT, ARB, OP, DOGE, ATOM, BCH, INJ, SOL, ETH (14종)</td><td>tiered_at+3%</td><td class="green">+0.39 평균</td></tr>
+<tr><td class="label">ADA, SUI, NEAR, LINK (4종)</td><td>baseline_trail2 유지</td><td class="gray">기준</td></tr>
+</table>
+
+<h3>옵션 C — Regime detector + 동적 룰 (이상적, 복잡)</h3>
+<p>최근 N일 buy&amp;hold |수익률| 로 시장 국면 분류 후 룰 전환:</p>
+<div class="diagram">
+최근 30일 |bnh%| ≥ 15  → STRONG_TREND  → baseline_trail2 (winners run 유지)
+6% ≤ |bnh%| &lt; 15      → WEAK_TREND    → tiered_at+3% (큰 이익 보호)
+|bnh%| &lt; 6            → RANGE         → tiered_at+3% (이익 빨리 잠금)
+</div>
+<p>구현은 30일 lookback price diff 한 줄. 단 regime 분류기 자체가 lag 가 있고, 분류 경계 (15%, 6%) 가 새 hyperparam 이 되어 또 다른 오버피팅 위험. 추가 검증 필요.</p>
+
+<h2>7. AVAX 케이스 — 검증 결과 재해석</h2>
+
+<p>사용자가 본 "$77 반납" 은 backtest 기준으로 보면 AVAX 가 tiered+3% 적용 시 가장 수혜를 받는 종목 (ΔSharpe +0.76). 즉 현재 AVAX 한 종목에 한해서는 tiered 가 명확히 좋다. 하지만 같은 룰을 모든 종목에 일괄 적용하면 ADA, SUI, NEAR, LINK 같은 종목에서 손해 — 18종 평균을 깎는다. <b>옵션 B (종목별 분기) 가 데이터적으로 가장 합리</b>.</p>
+
+<h2>8. 한계 / 다음 단계</h2>
+
+<ul>
+  <li><b>기간 한정</b> — 검증 365일은 2025-05 ~ 2026-05. 다른 시기 (예: 2022 bear) 에선 결과 달라질 수 있음. 다년 walk-forward (3-5년) 권장.</li>
+  <li><b>비용 모형 단순</b> — 4bps/side 만. funding rate, 슬리피지 미반영. 실제 live 수익률은 더 낮음.</li>
+  <li><b>regime 분류기 미구현</b> — 옵션 C 의 lookback window 와 분류 경계는 또 다른 hyperparam. 별도 walk-forward 로 결정 필요.</li>
+  <li><b>옵션 B 운영봇 통합</b> — 종목별 trail 설정을 받는 BotConfig 확장 필요 (현재는 전역 trail_pct 1개).</li>
+</ul>
+
+<div class="tldr">
+<b>TL;DR (비전공자용 요약)</b><br>
+"AVAX 미실현 이익이 $315 → $238 로 줄어든 건, 익절 기준을 정하면 막을 수 있을까?" 가 질문.<br>
+검증 한 마디: <b>"AVAX 만 보면 막을 수 있고, 18종 전체로는 강한 추세장에 손해. 단순 채택 X, 종목별 선별 적용 권장"</b>.<br><br>
+- 후보 룰 14개 (단순 trail / 단계 trail 압축 / 부분 익절 / 전량 익절 × 임계값 3~15%) 를 18종 × 365일 백테스트로 비교.<br>
+- in-sample (전 기간 평균) 에선 단계 trail 압축 (tiered+3%) 이 현행 대비 Sharpe +0.21 우세.<br>
+- 30일 단위 198개 윈도우로 쪼개 다시 보니, <b>강한 추세장 91 윈도우에선 오히려 더 자주 손해 (승률 42.9%)</b>. 횡보·약한 추세 윈도우에선 60% 대로 강함.<br>
+- 즉 이 룰은 "시장 상황에 따라" 효과가 갈리는 regime-dependent rule. 그대로 켜면 다음 강추세장에 baseline 보다 손해.<br>
+- 실용적 권장: <b>14개 종목엔 단계 trail 압축 적용, 4개 (ADA·SUI·NEAR·LINK) 는 현행 유지</b>. 이게 평균 +0.39 Sharpe.<br>
+- AVAX 한 종목에 대해선 단계 trail 압축이 최고의 수혜 (Sharpe +0.76). 사용자 직관은 데이터적으로 맞았다 — 단지 일괄 적용이 아니라 선별 적용이 필요할 뿐.
+</div>
+
+<h2>9. 관련 보고서 (시간 순)</h2>
+
+<table>
+<tr><th>날짜</th><th style="text-align:left">제목 / 링크</th><th style="text-align:left">결정 / 결과</th></tr>
+<tr>
+  <td class="label">2026-05-22</td>
+  <td class="label"><a href="../2026-05-22/crypto_swing_mode_AB.html">swing 모드 도입 — 옵션 A vs B</a></td>
+  <td class="label">운영봇에 trail-stop 청산 추가. 4h+12/48+Trail2 가 1h+6/24+Trail2 능가.</td>
+</tr>
+<tr>
+  <td class="label">2026-05-22</td>
+  <td class="label"><a href="../2026-05-22/crypto_swing_alts_expansion.html">알트 확장 (5종 → 18종)</a></td>
+  <td class="label">단일 룰로 종목 일괄 운영 가능 확인. TRX 만 trend-follow 와 안 맞음.</td>
+</tr>
+<tr>
+  <td class="label">2026-05-23</td>
+  <td class="label"><a href="../2026-05-23/swing_optY_optZ_diagnosis.html">옵션 Y/Z 진단 + long-short 가설</a></td>
+  <td class="label">live -$300 손실 원인 = long-only. <code>--allow-short</code> 로 backtest 동조.</td>
+</tr>
+<tr>
+  <td class="label">2026-05-28</td>
+  <td class="label"><a href="../2026-05-28/swing_walkforward.html">long-short walk-forward 검증</a></td>
+  <td class="label">11 윈도우 전부 +수익. 추세 의존 아님 (횡보 구간도 +).</td>
+</tr>
+<tr>
+  <td class="label">2026-05-28</td>
+  <td class="label"><a href="../2026-05-28/trend_vs_mr_walkforward.html">trend vs mean-reversion walk-forward</a></td>
+  <td class="label">모든 국면에서 TREND &gt; MR. MR 추가 불필요.</td>
+</tr>
+<tr>
+  <td class="label"><b>2026-05-30</b></td>
+  <td class="label"><b>본 보고서 — 익절 룰 walk-forward 검증</b></td>
+  <td class="label">tiered+3% 평균 우세, 강추세 약함 → 14/18 종목 부분 채택 권장.</td>
+</tr>
+</table>
+
+<h2>10. 관련 파일</h2>
+
+<table>
+<tr><th>파일</th><th style="text-align:left">설명</th></tr>
+<tr><td class="label"><code>scripts/backtest_crypto_tp_sweep.py</code></td><td class="label">365d in-sample 스윕 (14 룰 × 18종)</td></tr>
+<tr><td class="label"><code>scripts/backtest_crypto_tp_walkforward.py</code></td><td class="label">30일 윈도우 walk-forward (baseline vs tiered+3%)</td></tr>
+<tr><td class="label"><code>data/backtest_tp_sweep_365d_20260530_153557.json</code></td><td class="label">in-sample 스윕 결과</td></tr>
+<tr><td class="label"><code>data/backtest_tp_walkforward_365d_20260530_155806.parquet</code></td><td class="label">walk-forward 결과 (n=198)</td></tr>
+<tr><td class="label"><code>lib/autotrader/live/engine.py</code></td><td class="label">운영봇 엔진 (현행 baseline_trail2 구현)</td></tr>
+<tr><td class="label"><code>app/presets.py</code></td><td class="label">운영 프리셋 (옵션 B 적용 시 종목별 trail 분기 필요)</td></tr>
+</table>
+
+<h2>용어 정리집</h2>
+
+<table>
+<tr><th>용어</th><th style="text-align:left">한 줄 설명</th><th style="text-align:left">본문에서의 역할</th></tr>
+
+<tr><td class="label">trailing stop (trail)</td>
+    <td class="label">매수 후 최고가 (또는 SHORT 의 경우 최저가) 대비 X% 반대로 가면 자동 청산하는 룰</td>
+    <td class="label">현행 운영봇이 사용하는 청산 메커니즘. 기준선.</td></tr>
+
+<tr><td class="label">옵션 Z</td>
+    <td class="label">trail 판정을 봉 중간 가격이 아닌 봉 마감 종가 (close) 만 사용. backtest 일치성을 위한 단순화</td>
+    <td class="label">현재 운영봇 채택. AVAX intraday $8.65 가 trigger 못 한 이유.</td></tr>
+
+<tr><td class="label">MA crossover</td>
+    <td class="label">단기 이동평균 (fast MA) 이 장기 이동평균 (slow MA) 을 위로 뚫으면 LONG, 아래로 뚫으면 SHORT 신호. 추세추종의 기본형</td>
+    <td class="label">진입 신호. 운영봇은 4h × 12/48 (= 2일/8일 평균).</td></tr>
+
+<tr><td class="label">Sharpe ratio</td>
+    <td class="label">수익을 변동성으로 나눈 위험조정 수익률. 높을수록 같은 위험으로 더 많은 수익. 일반적으로 1.0 이상이면 우수, 2.0 이상은 매우 우수</td>
+    <td class="label">전략 비교의 단일 지표. 룰 채택 의사결정의 핵심 metric.</td></tr>
+
+<tr><td class="label">Max drawdown (MaxDD)</td>
+    <td class="label">자본곡선의 최고점 대비 최대 하락 폭 (%). "최악의 시점 손실"</td>
+    <td class="label">위험 측면. tiered+3% 가 baseline 대비 약간 줄임 (-9.19 → -8.96).</td></tr>
+
+<tr><td class="label">walk-forward</td>
+    <td class="label">시간을 따라 여러 윈도우로 쪼개 각각 평가, "한 번 잘 맞은 게 운인지 일관된 우세인지" 검증</td>
+    <td class="label">in-sample 의 +0.21 이 시간/국면 across robust 한지 확인. 결론: 부분적으로만.</td></tr>
+
+<tr><td class="label">in-sample / out-of-sample</td>
+    <td class="label">in-sample = 룰을 고르는 데 쓴 데이터. out-of-sample = 그 룰을 처음 보는 데이터. 후자에서도 좋아야 진짜 robust</td>
+    <td class="label">365d 전체 (in-sample) 에서 좋아도 30일 윈도우 일부 (out-of-sample 비슷) 에서 무너지면 오버핏 의심.</td></tr>
+
+<tr><td class="label">overfitting (오버피팅)</td>
+    <td class="label">특정 데이터에 너무 잘 맞춰서 새 데이터에선 실패하는 현상. backtest 의 가장 큰 함정</td>
+    <td class="label">tiered+3% 가 "365일이라는 우연한 시기" 에만 좋은 건지 확인이 핵심 동기.</td></tr>
+
+<tr><td class="label">regime / 시장 국면</td>
+    <td class="label">시장이 처해있는 상태. 본 분석은 30일 buy&amp;hold |수익률| 로 STRONG_TREND (≥15%), WEAK_TREND (6~15%), RANGE (&lt;6%) 로 분류</td>
+    <td class="label">tiered+3% 가 RANGE 에 강하고 STRONG_TREND 에 약하다는 결정적 발견.</td></tr>
+
+<tr><td class="label">tiered trail (단계적 trail 압축)</td>
+    <td class="label">진입 후 일정 이익 (예: +3%) 도달 시 trail 폭을 좁히는 룰 (예: 2% → 1%). "이익 보호 모드 진입"</td>
+    <td class="label">본 분석의 최우수 후보. 평균 우세, but regime dependent.</td></tr>
+
+<tr><td class="label">partial TP / hard TP</td>
+    <td class="label">partial = 이익 도달 시 포지션 일부 (예: 50%) 청산, hard = 전량 청산. 둘 다 winners run 을 끊는 효과</td>
+    <td class="label">backtest 결과 둘 다 baseline 보다 나쁨. winners run 의 가치를 정량적으로 보여줌.</td></tr>
+
+<tr><td class="label">winners run</td>
+    <td class="label">"이긴 트레이드를 빨리 청산하지 말고 끝까지 가져가라" 는 추세추종의 격언. trail-stop 의 철학적 배경</td>
+    <td class="label">왜 hard_tp_5% 가 Sharpe 4.1 → 2.5 로 박살나는지 설명. 큰 추세의 후반부가 평균 수익의 큰 부분.</td></tr>
+
+<tr><td class="label">low_water / high_water</td>
+    <td class="label">SHORT 포지션의 최저 종가 (low_water) / LONG 의 최고 종가 (high_water). trail trigger 의 기준점</td>
+    <td class="label">AVAX 의 경우 low_water = $8.813. trigger = $8.813 × 1.02 = $8.989.</td></tr>
+
+<tr><td class="label">buy&amp;hold (bnh)</td>
+    <td class="label">기간 시작 시 매수해 끝까지 보유했을 때의 수익률. 시장 자체 움직임</td>
+    <td class="label">windows 의 |bnh%| 로 시장 국면 분류.</td></tr>
+
+<tr><td class="label">non-overlapping window (비중첩 윈도우)</td>
+    <td class="label">시간을 겹치지 않게 잘라 만든 검증 구간. 30일 × 11개 = 330일 (≈ 365)</td>
+    <td class="label">각 윈도우가 독립 표본이 되어 통계적 분산 추정에 적합.</td></tr>
+</table>
+
+</body>
+</html>

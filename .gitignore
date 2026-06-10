@@ -1,0 +1,57 @@
+# ────── Secrets / API keys ──────
+.env
+.env.*
+!.env.example
+data/.api_token
+
+# ────── Python ──────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.Python
+
+# ────── Build artifacts ──────
+build/
+dist/
+*.spec.bak
+
+# ────── Runtime / state / 로그 ──────
+*.log
+data/_*.log
+data/_*.json
+data/_*.tmp
+data/crypto_runner_*.log
+data/crypto_runner_*.json
+data/crypto_app_log_*.json
+data/crypto_testnet_log_*.json
+data/engine_state.json
+data/engine_state.json.tmp
+
+# ────── Backtest 결과 (재현 가능, 재실행으로 생성) ──────
+data/backtest_*.parquet
+data/backtest_*.json
+data/_dashboard_data.json
+
+# ────── Flutter ──────
+mobile/.dart_tool/
+mobile/build/
+mobile/android/
+mobile/ios/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.metadata
+mobile/.packages
+mobile/pubspec.lock
+
+# ────── IDE / OS ──────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ────── 캐시·임시·기타 ──────
+*.tmp
+.pytest_cache/
+.mypy_cache/
