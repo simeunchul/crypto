@@ -66,6 +66,13 @@ def main():
     ap.add_argument("--cooldown-bars", type=int, default=1,
                     help="block-policy=cooldown 일 때 차단 봉 수 (interval 단위). "
                          "기본 1봉 = 4h interval 에서 4시간.")
+    ap.add_argument("--trail-type", choices=["fixed", "atr"], default="fixed",
+                    help="trail 폭 결정 방식. fixed=고정 퍼센트 (--trail-pct). "
+                         "atr=ATR x multiplier 동적 (--atr-window, --atr-mult).")
+    ap.add_argument("--atr-window", type=int, default=14,
+                    help="ATR 계산 봉 수 (Wilder 표준 14).")
+    ap.add_argument("--atr-mult", type=float, default=2.0,
+                    help="trail 폭 = ATR × multiplier. 1.5-3.0 권장.")
     ap.add_argument("--log", default=None)
     args = ap.parse_args()
 
@@ -96,6 +103,9 @@ def main():
         log_path=log_path,
         block_policy=args.block_policy,
         cooldown_bars=args.cooldown_bars,
+        trail_type=args.trail_type,
+        atr_window=args.atr_window,
+        atr_multiplier=args.atr_mult,
     )
 
     engine = BotEngine(cfg)

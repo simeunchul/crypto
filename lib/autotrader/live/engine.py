@@ -104,6 +104,8 @@ class SymbolState:
     # 주문 실패/재시도 추적 (state desync 방지)
     close_retry_count: int = 0
     last_order_error: Optional[str] = None
+    # ATR 동적 trail 표시용 (snapshot/log)
+    atr_value: float = 0.0
 
 
 @dataclass
@@ -126,6 +128,10 @@ class BotConfig:
     # 차단 정책 (backtest 검증: cooldown_1봉 = Sharpe +6.5 개선)
     block_policy: str = "signal_change"      # "signal_change" | "cooldown"
     cooldown_bars: int = 0                   # cooldown 일 때 차단 봉 수 (4h 단위)
+    # Trail 폭 정책 — 동적/고정 선택
+    trail_type: str = "fixed"                # "fixed" (trail_pct 사용) | "atr" (ATR × mult)
+    atr_window: int = 14                     # ATR 계산 봉 수 (Wilder 기본 14)
+    atr_multiplier: float = 2.0              # ATR × multiplier = trail 폭
 
     def resolved_exit_rule(self) -> str:
         if self.exit_rule:
@@ -160,6 +166,9 @@ class BotConfig:
             "duration_hours": self.duration_hours,
             "block_policy": self.block_policy,
             "cooldown_bars": self.cooldown_bars,
+            "trail_type": self.trail_type,
+            "atr_window": self.atr_window,
+            "atr_multiplier": self.atr_multiplier,
         }
 
 
@@ -640,13 +649,31 @@ class BotEngine:
             err_str = str(e)
             # 3. -2022 발생 시 reduceOnly 없이 재시도 (testnet quirk)
             if "-2022" in err_str or "ReduceOnly" in err_str:
-                self._log("warning",
-                          f"[{sym}] {label} reduceOnly 거부 (-2022). plain MARKET 으로 fallback.")
+                # ★ BUG FIX 2: fallback 직전 binance position 재확인
+                # -2022 거부 사유가 "이미 position 0" 일 수 있음 → plain order 면 의도치 않은 반대 진입
                 try:
-                    r = c.order(sym, qty=qty_to_close, side=side_close,
+                    re_check = c.position(sym)
+                    re_qty = abs(re_check[0]["qty"]) if re_check else 0.0
+                except Exception:
+                    re_qty = qty_to_close  # 확인 실패 시 원래 qty 신뢰
+                if re_qty < qty_to_close * 0.1:
+                    # binance position 이 거의 0 → 이미 close 됨. fallback 하지 말고 성공 처리.
+                    self._log("info",
+                              f"[{sym}] {label} reduceOnly 거부됐지만 binance position={re_qty:.4f}로 거의 0. "
+                              f"이미 close 됨으로 간주 (fallback skip).")
+                    st.close_retry_count = 0
+                    st.last_order_error = None
+                    return True
+                self._log("warning",
+                          f"[{sym}] {label} reduceOnly 거부 (-2022). plain MARKET 으로 fallback (잔여 qty {re_qty:.4f}).")
+                try:
+                    # fallback 시점의 최신 qty 사용 (원래 qty 보다 줄어들었을 수 있음)
+                    fallback_qty = re_qty if re_qty > 0 else qty_to_close
+                    r = c.order(sym, qty=fallback_qty, side=side_close,
                                 order_type="MARKET", reduce_only=False)
                     order_id = r.get("orderId") if isinstance(r, dict) else None
                     used_fallback = True
+                    qty_to_close = fallback_qty  # 확인 단계용
                 except Exception as e2:
                     st.close_retry_count += 1
                     st.last_order_error = str(e2)[:120]
@@ -761,14 +788,44 @@ class BotEngine:
         trail_triggered = False
         if exit_rule == "trail" and st.current_position != 0 and new_bar_closed:
             bar_close = float(closed_kl[-1][4])
-            if st.current_position == 1:
-                st.high_water = max(st.high_water or bar_close, bar_close)
-                if bar_close < st.high_water * (1 - cfg.trail_pct):
-                    trail_triggered = True
-            elif st.current_position == -1:
-                st.low_water = min(st.low_water or bar_close, bar_close)
-                if bar_close > st.low_water * (1 + cfg.trail_pct):
-                    trail_triggered = True
+            # trail 폭 결정 — 고정 % 또는 ATR × multiplier (변동성 기반)
+            if cfg.trail_type == "atr" and len(closed_kl) >= cfg.atr_window + 1:
+                # ATR 계산 — Wilder True Range 의 N-period 평균
+                #   TR = max(high-low, |high-prev_close|, |low-prev_close|)
+                #   ATR = mean(TR_last_N_bars)
+                trs = []
+                for k in closed_kl[-cfg.atr_window:]:
+                    high = float(k[2]); low = float(k[3])
+                    # k 의 직전 봉 close 가 필요한데 closed_kl 안에서 찾기
+                    idx = closed_kl.index(k)
+                    if idx > 0:
+                        prev_close = float(closed_kl[idx-1][4])
+                        tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+                    else:
+                        tr = high - low
+                    trs.append(tr)
+                atr = sum(trs) / len(trs)
+                trail_distance = atr * cfg.atr_multiplier
+                # 표시용 (snapshot 에서 보기 위함)
+                st.atr_value = atr
+                if st.current_position == 1:
+                    st.high_water = max(st.high_water or bar_close, bar_close)
+                    if bar_close < st.high_water - trail_distance:
+                        trail_triggered = True
+                elif st.current_position == -1:
+                    st.low_water = min(st.low_water or bar_close, bar_close)
+                    if bar_close > st.low_water + trail_distance:
+                        trail_triggered = True
+            else:
+                # fixed % trail (기존 동작)
+                if st.current_position == 1:
+                    st.high_water = max(st.high_water or bar_close, bar_close)
+                    if bar_close < st.high_water * (1 - cfg.trail_pct):
+                        trail_triggered = True
+                elif st.current_position == -1:
+                    st.low_water = min(st.low_water or bar_close, bar_close)
+                    if bar_close > st.low_water * (1 + cfg.trail_pct):
+                        trail_triggered = True
 
         # 청산 시도 — trail 발동 또는 직전 tick 의 실패 재시도
         needs_close = (exit_rule == "trail"
@@ -776,7 +833,10 @@ class BotEngine:
                         and (trail_triggered or st.close_retry_count > 0))
         if needs_close:
             target_was = st.current_position
-            if self._close_position_confirmed(c, sym, st, bal, "TRAIL-STOP", mark):
+            # retry 인지 1차인지 로그에 명시 (testnet partial fill 흔적 추적 용이)
+            close_label = ("TRAIL-STOP-RETRY" if st.close_retry_count > 0
+                           else "TRAIL-STOP")
+            if self._close_position_confirmed(c, sym, st, bal, close_label, mark):
                 action = f"TRAIL-STOP {target_was}→0"
                 st.stopped_until_signal_change = target_was
                 # cooldown 정책용 — 청산된 봉의 open_time 저장 (재진입 차단 기준점)
@@ -786,6 +846,10 @@ class BotEngine:
                 st.high_water = None
                 st.low_water = None
                 st.last_action_tick = tick
+                # ★ BUG FIX 1: trail 발동 close 성공 시에도 last_evaluated_bar_ts 갱신
+                # 안 그러면 같은 봉이 다음 tick 에 또 평가됨 → 두 번째 trail-stop 발생 위험
+                if last_closed_ts > 0:
+                    st.last_evaluated_bar_ts = last_closed_ts
             else:
                 action = f"TRAIL-STOP RETRY({st.close_retry_count})"
                 # state 유지. 다음 tick 의 reconcile + 재시도가 마무리.
